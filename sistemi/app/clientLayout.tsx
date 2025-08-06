@@ -23,11 +23,22 @@ export default function ClientLayout({
 
   useEffect(() => {
     const checkAuth = () => {
+      const token = localStorage.getItem("token")
       const loggedIn = localStorage.getItem("isLoggedIn") === "true"
-      setIsLoggedIn(loggedIn)
+      let valid = loggedIn
+
+      // Cek token format JWT (ada 3 bagian dipisah titik)
+      if (!token || token.split('.').length !== 3) {
+        valid = false
+      }
+
+      setIsLoggedIn(valid)
       setIsLoading(false)
 
-      if (!loggedIn && pathname !== "/login") {
+      if (!valid && pathname !== "/login") {
+        localStorage.removeItem("token")
+        localStorage.removeItem("user")
+        localStorage.removeItem("isLoggedIn")
         router.push("/login")
       }
     }

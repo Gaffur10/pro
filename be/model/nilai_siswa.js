@@ -23,6 +23,10 @@ const nilai_Siswa = db.define(
       type: DataTypes.STRING(20),
       allowNull: false,
     },
+    tahun_ajaran: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+    },
     Matematika: {
       type: DataTypes.DECIMAL(5, 2),
       allowNull: true,

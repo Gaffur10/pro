@@ -112,7 +112,9 @@ export const runClustering = async (req, res) => {
       rata_rata: parseFloat(item.rata_rata),
       nis: item.siswa.nis,
       nama: item.siswa.nama,
-      kelas: item.siswa.kelas
+      kelas: item.siswa.kelas,
+      semester: item.semester,
+      tahun_ajaran: item.tahun_ajaran
     }));
 
     if (!data || data.length === 0) {
@@ -132,14 +134,16 @@ export const runClustering = async (req, res) => {
     const { clusters, centroids } = kMeans(data, jumlah_cluster);
 
     // Determine cluster labels based on average values descending
-    const sortedCentroidsDesc = [...centroids].sort((a, b) => b - a);
+    const indexedCentroids = centroids.map((value, index) => ({ value, originalIndex: index }));
+    indexedCentroids.sort((a, b) => b.value - a.value);
+
     const clusterLabels = {};
     const clusterNumberMap = {}; // Map original centroid index to new cluster number (1-based)
-    sortedCentroidsDesc.forEach((centroid, index) => {
-      const originalIndex = centroids.indexOf(centroid);
-      clusterNumberMap[originalIndex] = index + 1; // cluster number: 1 is highest centroid
-      if (index === 0) clusterLabels[originalIndex] = 'Tinggi';
-      else if (index === 1) clusterLabels[originalIndex] = 'Sedang';
+    indexedCentroids.forEach((indexedCentroid, newIndex) => {
+      const { originalIndex } = indexedCentroid;
+      clusterNumberMap[originalIndex] = newIndex + 1; // cluster number: 1 is highest centroid
+      if (newIndex === 0) clusterLabels[originalIndex] = 'Tinggi';
+      else if (newIndex === 1) clusterLabels[originalIndex] = 'Sedang';
       else clusterLabels[originalIndex] = 'Rendah';
     });
 
@@ -153,6 +157,8 @@ export const runClustering = async (req, res) => {
         siswa_id: cluster.siswa_id,
         cluster: newClusterNumber,
         keterangan: clusterLabels[cluster.cluster],
+        semester: cluster.semester,
+        tahun_ajaran: cluster.tahun_ajaran,
         jarak_centroid: cluster.distance,
         algoritma,
         jumlah_cluster
@@ -173,6 +179,8 @@ export const runClustering = async (req, res) => {
         rata_rata: cluster.rata_rata,
         cluster: newClusterNumber,
         keterangan: clusterLabels[cluster.cluster],
+        semester: cluster.semester,
+        tahun_ajaran: cluster.tahun_ajaran,
         jarak_centroid: cluster.distance
       };
     });
@@ -216,13 +224,58 @@ export const runClustering = async (req, res) => {
 
 export const getClusteringResults = async (req, res) => {
   try {
-    const { page = 1, limit = 10, cluster = '' } = req.query;
-    const offset = (page - 1) * limit;
-
+    const { page = 1, limit = 10, cluster = '', all = false } = req.query;
+    
     const whereClause = {};
     if (cluster) {
       whereClause.keterangan = cluster;
     }
+
+    // If all=true or limit is very high, return all clustering results without pagination
+    if (all === 'true' || parseInt(limit) >= 1000) {
+      const results = await hasil_cluster.findAll({
+        where: whereClause,
+        include: [
+          {
+            model: Siswa,
+            as: 'siswa',
+            attributes: ['id', 'nis', 'nama', 'kelas']
+          }
+        ],
+        order: [['created_at', 'DESC']]
+      });
+
+      const totalCount = await hasil_cluster.count({
+        where: whereClause
+      });
+
+      const formattedResults = results.map(row => ({
+        id: row.id,
+        siswa_id: row.siswa_id,
+        nis: row.siswa.nis,
+        nama: row.siswa.nama,
+        kelas: row.siswa.kelas,
+        cluster: row.cluster,
+        keterangan: row.keterangan,
+        jarak_centroid: row.jarak_centroid,
+        algoritma: row.algoritma,
+        jumlah_cluster: row.jumlah_cluster
+      }));
+
+      return res.json({
+        success: true,
+        data: formattedResults,
+        pagination: {
+          current_page: 1,
+          total_pages: 1,
+          total_items: totalCount,
+          items_per_page: totalCount
+        }
+      });
+    }
+
+    // Normal pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { count, rows } = await hasil_cluster.findAndCountAll({
       where: whereClause,
@@ -256,7 +309,7 @@ export const getClusteringResults = async (req, res) => {
       data: results,
       pagination: {
         current_page: parseInt(page),
-        total_pages: Math.ceil(count / limit),
+        total_pages: Math.ceil(count / parseInt(limit)),
         total_items: count,
         items_per_page: parseInt(limit)
       }
@@ -300,13 +353,10 @@ export const getClusteringStats = async (req, res) => {
     let averageDistance = 0;
     if (latestClustering) {
       const distances = await hasil_cluster.findAll({
-        where: {
-          created_at: latestClustering.created_at
-        },
         attributes: ['jarak_centroid']
       });
       if (distances.length > 0) {
-        const totalDistance = distances.reduce((sum, d) => sum + d.jarak_centroid, 0);
+        const totalDistance = distances.reduce((sum, d) => sum + parseFloat(d.jarak_centroid), 0);
         averageDistance = totalDistance / distances.length;
       }
     }

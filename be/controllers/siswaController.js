@@ -3,9 +3,8 @@ import Siswa from '../model/siswaModel.js';
 
 export const getAllSiswa = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '' } = req.query;
-    const offset = (page - 1) * limit;
-
+    const { page = 1, limit = 10, search = '', all = false } = req.query;
+    
     const whereClause = search ? {
       [Op.or]: [
         { nama: { [Op.like]: `%${search}%` } },
@@ -14,10 +13,34 @@ export const getAllSiswa = async (req, res) => {
       ]
     } : {};
 
+    // If all=true or limit is very high, return all students without pagination
+    if (all === 'true' || parseInt(limit) >= 1000) {
+      const students = await Siswa.findAll({
+        where: whereClause,
+        order: [['created_at', 'DESC']]
+      });
+
+      const totalCount = await Siswa.count({ where: whereClause });
+
+      return res.json({
+        success: true,
+        data: students,
+        pagination: {
+          current_page: 1,
+          total_pages: 1,
+          total_items: totalCount,
+          items_per_page: totalCount
+        }
+      });
+    }
+
+    // Normal pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
     const { count, rows } = await Siswa.findAndCountAll({
       where: whereClause,
       limit: parseInt(limit),
-      offset: parseInt(offset),
+      offset: offset,
       order: [['created_at', 'DESC']]
     });
 
@@ -26,7 +49,7 @@ export const getAllSiswa = async (req, res) => {
       data: rows,
       pagination: {
         current_page: parseInt(page),
-        total_pages: Math.ceil(count / limit),
+        total_pages: Math.ceil(count / parseInt(limit)),
         total_items: count,
         items_per_page: parseInt(limit)
       }

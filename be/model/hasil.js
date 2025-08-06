@@ -27,6 +27,14 @@ const hasil_cluster = db.define(
       type: DataTypes.STRING(50),
       allowNull: false,
     },
+    semester: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+    },
+    tahun_ajaran: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
     jarak_centroid: {
       type: DataTypes.DECIMAL(10, 6),
       allowNull: false,

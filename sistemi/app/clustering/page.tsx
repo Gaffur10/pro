@@ -172,7 +172,11 @@ export default function ClusteringPage() {
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-          {typeof error === "string" ? error : error.message || "Terjadi kesalahan"}
+          {typeof error === "string"
+            ? error
+            : (typeof error === "object" && error !== null && "message" in error)
+              ? (error as any).message || "Terjadi kesalahan"
+              : "Terjadi kesalahan"}
         </div>
       )}
 
@@ -306,8 +310,8 @@ export default function ClusteringPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="k-means">K-Means</SelectItem>
-                  <SelectItem value="k-medoids">K-Medoids</SelectItem>
-                  <SelectItem value="hierarchical">Hierarchical</SelectItem>
+                  {/* <SelectItem value="k-medoids">K-Medoids</SelectItem>
+                  <SelectItem value="hierarchical">Hierarchical</SelectItem> */}
                 </SelectContent>
               </Select>
             </div>
@@ -373,17 +377,17 @@ export default function ClusteringPage() {
                   const clusterInfo = getClusterLabel(result.cluster)
                   return (
                     <TableRow key={result.id}>
-                      <TableCell className="font-medium">{result.siswa?.nis}</TableCell>
-                      <TableCell>{result.siswa?.nama}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{result.siswa?.kelas}</Badge>
-                      </TableCell>
+                      
                       <TableCell>
                         <Badge variant={clusterInfo.variant}>
                           {clusterInfo.label}
                         </Badge>
                       </TableCell>
-                      <TableCell>{result.jarak_centroid.toFixed(4)}</TableCell>
+                      <TableCell>
+                        {result.jarak_centroid != null && !isNaN(Number(result.jarak_centroid))
+                          ? Number(result.jarak_centroid).toFixed(4)
+                          : "-"}
+                      </TableCell>
                       <TableCell>{result.algoritma}</TableCell>
                       <TableCell>{result.jumlah_cluster}</TableCell>
                     </TableRow>

@@ -4,9 +4,8 @@ import Siswa from '../model/siswaModel.js';
 
 export const getAllNilai = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '', semester = '' } = req.query;
-    const offset = (page - 1) * limit;
-
+    const { page = 1, limit = 10, search = '', semester = '', all = false } = req.query;
+    
     const whereClause = {};
     if (search) {
       whereClause['$siswa.nama$'] = { [Op.like]: `%${search}%` };
@@ -14,6 +13,46 @@ export const getAllNilai = async (req, res) => {
     if (semester) {
       whereClause.semester = semester;
     }
+
+    // If all=true or limit is very high, return all nilai without pagination
+    if (all === 'true' || parseInt(limit) >= 1000) {
+      const nilai = await nilai_Siswa.findAll({
+        where: whereClause,
+        include: [
+          {
+            model: Siswa,
+            as: 'siswa',
+            attributes: ['id', 'nis', 'nama', 'kelas']
+          }
+        ],
+        order: [['created_at', 'DESC']]
+      });
+
+      const totalCount = await nilai_Siswa.count({
+        where: whereClause,
+        include: [
+          {
+            model: Siswa,
+            as: 'siswa',
+            attributes: ['id', 'nis', 'nama', 'kelas']
+          }
+        ]
+      });
+
+      return res.json({
+        success: true,
+        data: nilai,
+        pagination: {
+          current_page: 1,
+          total_pages: 1,
+          total_items: totalCount,
+          items_per_page: totalCount
+        }
+      });
+    }
+
+    // Normal pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { count, rows } = await nilai_Siswa.findAndCountAll({
       where: whereClause,
@@ -34,7 +73,7 @@ export const getAllNilai = async (req, res) => {
       data: rows,
       pagination: {
         current_page: parseInt(page),
-        total_pages: Math.ceil(count / limit),
+        total_pages: Math.ceil(count / parseInt(limit)),
         total_items: count,
         items_per_page: parseInt(limit)
       }
@@ -89,6 +128,7 @@ export const createNilai = async (req, res) => {
     const {
       siswa_id,
       semester,
+      tahun_ajaran,
       Matematika,
       PKN,
       Seni_Budaya,
@@ -101,10 +141,10 @@ export const createNilai = async (req, res) => {
       TIK
     } = req.body;
 
-    if (!siswa_id || !semester) {
+    if (!siswa_id || !semester || !tahun_ajaran) {
       return res.status(400).json({
         success: false,
-        message: 'ID siswa dan semester harus diisi'
+        message: 'ID siswa, semester, dan tahun ajaran harus diisi'
       });
     }
 
@@ -149,6 +189,7 @@ export const createNilai = async (req, res) => {
     const nilai = await nilai_Siswa.create({
       siswa_id,
       semester,
+      tahun_ajaran,
       Matematika: Matematika || null,
       PKN: PKN || null,
       Seni_Budaya: Seni_Budaya || null,
@@ -181,6 +222,7 @@ export const updateNilai = async (req, res) => {
     const { id } = req.params;
     const {
       semester,
+      tahun_ajaran,
       Matematika,
       PKN,
       Seni_Budaya,
@@ -221,6 +263,7 @@ export const updateNilai = async (req, res) => {
 
     await nilai.update({
       semester: semester || nilai.semester,
+      tahun_ajaran: tahun_ajaran || nilai.tahun_ajaran,
       Matematika: Matematika !== undefined ? Matematika : nilai.Matematika,
       PKN: PKN !== undefined ? PKN : nilai.PKN,
       Seni_Budaya: Seni_Budaya !== undefined ? Seni_Budaya : nilai.Seni_Budaya,
@@ -275,54 +318,51 @@ export const deleteNilai = async (req, res) => {
   }
 };
 
-export const getNilaiStats = async (req, res) => {
+
+export const getDistinctTahunAjaran = async (req, res) => {
   try {
-    const totalNilai = await nilai_Siswa.count();
-    
-    const avgRataRata = await nilai_Siswa.findOne({
+    const distinctTahunAjaran = await nilai_Siswa.findAll({
       attributes: [
-        [nilai_Siswa.sequelize.fn('AVG', nilai_Siswa.sequelize.col('rata_rata')), 'rata_rata_keseluruhan']
-      ]
-    });
-
-    const nilaiBySemester = await nilai_Siswa.findAll({
-      attributes: [
-        'semester',
-        [nilai_Siswa.sequelize.fn('COUNT', '*'), 'jumlah'],
-        [nilai_Siswa.sequelize.fn('AVG', nilai_Siswa.sequelize.col('rata_rata')), 'rata_rata']
+        [nilai_Siswa.sequelize.fn('DISTINCT', nilai_Siswa.sequelize.col('tahun_ajaran')), 'tahun_ajaran']
       ],
-      group: ['semester']
-    });
-
-    const nilaiByKelas = await nilai_Siswa.findAll({
-      include: [
-        {
-          model: Siswa,
-          as: 'siswa',
-          attributes: ['kelas']
-        }
-      ],
-      attributes: [
-        [nilai_Siswa.sequelize.fn('AVG', nilai_Siswa.sequelize.col('rata_rata')), 'rata_rata'],
-        [nilai_Siswa.sequelize.fn('COUNT', '*'), 'jumlah']
-      ],
-      group: ['siswa.kelas']
+      order: [['tahun_ajaran', 'DESC']]
     });
 
     res.json({
       success: true,
-      data: {
-        total_nilai: totalNilai,
-        rata_rata_keseluruhan: parseFloat(avgRataRata.dataValues.rata_rata_keseluruhan || 0).toFixed(2),
-        by_semester: nilaiBySemester,
-        by_kelas: nilaiByKelas
-      }
+      data: distinctTahunAjaran.map(item => item.tahun_ajaran)
     });
   } catch (error) {
-    console.error('Get nilai stats error:', error);
+    console.error('Get distinct tahun ajaran error:', error);
     res.status(500).json({
       success: false,
       message: 'Terjadi kesalahan server'
+    });
+  }
+};
+
+export const getNilaiStats = async (req, res) => {
+  try {
+    const bySemester = await nilai_Siswa.findAll({
+      attributes: [
+        'semester',
+        [nilai_Siswa.sequelize.fn('COUNT', nilai_Siswa.sequelize.col('id')), 'jumlah'],
+        [nilai_Siswa.sequelize.fn('AVG', nilai_Siswa.sequelize.col('rata_rata')), 'rata_rata']
+      ],
+      group: ['semester'],
+      order: [['semester', 'ASC']]
+    });
+    res.json({
+      success: true,
+      data: {
+        by_semester: bySemester
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Gagal mengambil statistik nilai',
+      error: error.message
     });
   }
 };

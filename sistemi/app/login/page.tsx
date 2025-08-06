@@ -27,14 +27,14 @@ export default function LoginPage() {
 
     try {
       const response = await apiService.login(email, password)
-      
-      // Simpan token dan data user
-      localStorage.setItem("token", response.data.token)
-      localStorage.setItem("user", JSON.stringify(response.data.user))
-      localStorage.setItem("isLoggedIn", "true")
-      
-      // Redirect ke dashboard
-      router.push("/")
+      if (response && response.data && response.data.token && response.data.user) {
+        localStorage.setItem("token", response.data.token)
+        localStorage.setItem("user", JSON.stringify(response.data.user))
+        localStorage.setItem("isLoggedIn", "true")
+        router.push("/")
+      } else {
+        setError("Login gagal, data tidak valid dari server")
+      }
     } catch (error: any) {
       setError(error.message || "Terjadi kesalahan saat login")
     } finally {
