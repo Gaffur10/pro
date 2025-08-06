@@ -26,6 +26,7 @@ interface NilaiSiswa {
   id: number;
   siswa_id: number;
   semester: string;
+  tahun_ajaran: string;
   Matematika: number;
   PKN: number;
   Seni_Budaya: number;
@@ -65,6 +66,7 @@ export default function GradesPage() {
   const [formData, setFormData] = useState({
     siswa_id: "",
     semester: "",
+    tahun_ajaran: "",
     Matematika: "",
     PKN: "",
     Seni_Budaya: "",
@@ -85,7 +87,11 @@ export default function GradesPage() {
   const fetchGrades = async () => {
     try {
       setLoading(true)
-      const response = await apiService.getNilai()
+      // Always get all nilai without pagination
+      const params = {
+        all: 'true'
+      }
+      const response = await apiService.getNilai(params)
       setGrades(response.data)
     } catch (error: any) {
       setError(error.message || "Gagal memuat data nilai")
@@ -158,6 +164,7 @@ export default function GradesPage() {
     setFormData({
       siswa_id: grade.siswa_id.toString(),
       semester: grade.semester,
+      tahun_ajaran: grade.tahun_ajaran,
       Matematika: grade.Matematika.toString(),
       PKN: grade.PKN.toString(),
       Seni_Budaya: grade.Seni_Budaya.toString(),
@@ -187,6 +194,7 @@ export default function GradesPage() {
     setFormData({
       siswa_id: "",
       semester: "",
+      tahun_ajaran: "",
       Matematika: "",
       PKN: "",
       Seni_Budaya: "",
@@ -261,7 +269,7 @@ export default function GradesPage() {
               </DialogHeader>
               <form onSubmit={handleSubmit}>
                 <div className="grid gap-4 py-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="grid gap-2">
                       <Label htmlFor="siswa_id">Siswa</Label>
                       <Select
@@ -294,6 +302,16 @@ export default function GradesPage() {
                           <SelectItem value="Genap">Semester Genap</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="tahun_ajaran">Tahun Ajaran</Label>
+                      <Input
+                        id="tahun_ajaran"
+                        placeholder="Contoh: 2023/2024"
+                        value={formData.tahun_ajaran}
+                        onChange={(e) => setFormData({ ...formData, tahun_ajaran: e.target.value })}
+                        required
+                      />
                     </div>
                   </div>
                   
@@ -479,6 +497,7 @@ export default function GradesPage() {
               <TableHead>Nama</TableHead>
               <TableHead>Kelas</TableHead>
               <TableHead>Semester</TableHead>
+              <TableHead>Tahun Ajaran</TableHead>
               <TableHead>Matematika</TableHead>
               <TableHead>PKN</TableHead>
               <TableHead>Seni Budaya</TableHead>
@@ -502,6 +521,7 @@ export default function GradesPage() {
                   <Badge variant="outline">{grade.siswa?.kelas}</Badge>
                 </TableCell>
                 <TableCell>{grade.semester}</TableCell>
+                <TableCell>{grade.tahun_ajaran}</TableCell>
                 <TableCell>{grade.Matematika}</TableCell>
                 <TableCell>{grade.PKN}</TableCell>
                 <TableCell>{grade.Seni_Budaya}</TableCell>

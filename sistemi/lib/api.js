@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 class ApiService {
   constructor() {
@@ -21,15 +21,38 @@ class ApiService {
 
     try {
       const response = await fetch(url, config);
-      const data = await response.json();
       
+      // Handle network errors
       if (!response.ok) {
-        throw new Error(data.message || 'Terjadi kesalahan');
+        const errorData = await response.json().catch(() => ({}));
+        
+        // Handle authentication errors
+        if (response.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('isLoggedIn');
+          localStorage.removeItem('userRole');
+          window.location.href = '/login';
+          throw new Error('Sesi Anda telah berakhir. Silakan login kembali.');
+        }
+        
+        // Handle server errors
+        if (response.status >= 500) {
+          throw new Error('Terjadi kesalahan server. Silakan coba lagi nanti.');
+        }
+        
+        throw new Error(errorData.message || `Error ${response.status}: ${response.statusText}`);
       }
       
+      const data = await response.json();
       return data;
     } catch (error) {
       console.error('API Error:', error);
+      
+      // Handle network connectivity issues
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
+      }
+      
       throw error;
     }
   }
@@ -62,6 +85,10 @@ class ApiService {
 
   // Siswa Management
   async getSiswa(params = {}) {
+    // If no params provided, get all students
+    if (Object.keys(params).length === 0) {
+      params = { all: 'true' };
+    }
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/siswa?${queryString}`);
   }
@@ -96,6 +123,13 @@ class ApiService {
 
   // Nilai Management
   async getNilai(params = {}) {
+    // If no params provided, get all nilai
+    if (Object.keys(params).length === 0) {
+      params = { all: 'true' };
+    } else if (!params.paginated) {
+      // If params provided but paginated not explicitly set, get all nilai
+      params.all = 'true';
+    }
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/nilai?${queryString}`);
   }
@@ -137,6 +171,13 @@ class ApiService {
   }
 
   async getClusteringResults(params = {}) {
+    // If no params provided, get all clustering results
+    if (Object.keys(params).length === 0) {
+      params = { all: 'true' };
+    } else if (!params.paginated) {
+      // If params provided but paginated not explicitly set, get all results
+      params.all = 'true';
+    }
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/clustering/results?${queryString}`);
   }
@@ -203,6 +244,20 @@ class ApiService {
 
   async getQuickStats() {
     return this.request('/dashboard/quick-stats');
+  }
+
+  // Utility methods
+  isAuthenticated() {
+    const token = localStorage.getItem('token');
+    const isLoggedIn = localStorage.getItem('isLoggedIn');
+    return token && isLoggedIn === 'true';
+  }
+
+  logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('userRole');
+    window.location.href = '/login';
   }
 }
 

@@ -8,6 +8,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { Sidebar } from "@/components/sidebar"
 import { Header } from "@/components/header"
+import { ErrorBoundary } from "@/components/error-boundary"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -30,6 +31,29 @@ export default function ClientLayout({
       // Cek token format JWT (ada 3 bagian dipisah titik)
       if (!token || token.split('.').length !== 3) {
         valid = false
+      } else {
+        try {
+          // Decode JWT payload
+          const base64Url = token.split('.')[1]
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+          const jsonPayload = decodeURIComponent(
+            atob(base64)
+              .split('')
+              .map(function (c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+              })
+              .join('')
+          )
+          const payload = JSON.parse(jsonPayload)
+
+          // Check token expiration (exp is in seconds)
+          const currentTime = Math.floor(Date.now() / 1000)
+          if (payload.exp && payload.exp < currentTime) {
+            valid = false
+          }
+        } catch (error) {
+          valid = false
+        }
       }
 
       setIsLoggedIn(valid)
@@ -64,7 +88,11 @@ export default function ClientLayout({
   if (pathname === "/login") {
     return (
       <html lang="id">
-        <body className={inter.className}>{children}</body>
+        <body className={inter.className}>
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
+        </body>
       </html>
     )
   }
@@ -76,13 +104,15 @@ export default function ClientLayout({
   return (
     <html lang="id">
       <body className={inter.className}>
-        <div className="flex h-screen bg-gray-50">
-          <Sidebar />
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <Header />
-            <main className="flex-1 overflow-auto p-6">{children}</main>
+        <ErrorBoundary>
+          <div className="flex h-screen bg-gray-50">
+            <Sidebar />
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <Header />
+              <main className="flex-1 overflow-auto p-6">{children}</main>
+            </div>
           </div>
-        </div>
+        </ErrorBoundary>
       </body>
     </html>
   )

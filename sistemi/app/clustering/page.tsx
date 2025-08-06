@@ -4,7 +4,6 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -21,12 +20,9 @@ interface ClusteringResult {
   algoritma: string
   jumlah_cluster: number
   created_at: string
-  siswa?: {
-    id: number
-    nama: string
-    nis: string
-    kelas: string
-  }
+  nis?: string
+  nama?: string
+  kelas?: string
 }
 
 interface ClusteringStats {
@@ -49,7 +45,7 @@ export default function ClusteringPage() {
   const [error, setError] = useState("")
   const [clusteringParams, setClusteringParams] = useState({
     algoritma: "k-means",
-    jumlah_cluster: "3",
+    jumlah_cluster: "3"
   })
 
   useEffect(() => {
@@ -59,8 +55,12 @@ export default function ClusteringPage() {
   const fetchClusteringData = async () => {
     try {
       setLoading(true)
+      // Always get all clustering results without pagination
+      const params: any = {
+        all: 'true'
+      }
       const [resultsResponse, statsResponse] = await Promise.all([
-        apiService.getClusteringResults(),
+        apiService.getClusteringResults(params),
         apiService.getClusteringStats()
       ])
       setResults(resultsResponse.data)
@@ -71,7 +71,6 @@ export default function ClusteringPage() {
       setLoading(false)
     }
   }
-
   const handleRunClustering = async () => {
     try {
       setRunning(true)
@@ -82,7 +81,7 @@ export default function ClusteringPage() {
       
       await apiService.runClustering({
         algoritma: normalizedAlgoritma,
-        jumlah_cluster: parseInt(clusteringParams.jumlah_cluster)
+        jumlah_cluster: parseInt(clusteringParams.jumlah_cluster),
       })
       
       // Refresh data after clustering
@@ -93,7 +92,6 @@ export default function ClusteringPage() {
       setRunning(false)
     }
   }
-
   const handleClearResults = async () => {
     if (confirm("Apakah Anda yakin ingin menghapus semua hasil clustering?")) {
       try {
@@ -110,8 +108,8 @@ export default function ClusteringPage() {
     const csvContent =
       "data:text/csv;charset=utf-8," +
       "NIS,Nama,Kelas,Cluster,Jarak Centroid,Algoritma,Jumlah Cluster\n" +
-      results.map((r) => 
-        `${r.siswa?.nis || ""},${r.siswa?.nama || ""},${r.siswa?.kelas || ""},${r.cluster},${r.jarak_centroid},${r.algoritma},${r.jumlah_cluster}`
+      results.map((r: any) => 
+        `${r.nis || ""},${r.nama || ""},${r.kelas || ""},${r.cluster},${r.jarak_centroid},${r.algoritma},${r.jumlah_cluster}`
       ).join("\n")
 
     const encodedUri = encodeURI(csvContent)
@@ -376,21 +374,23 @@ export default function ClusteringPage() {
                 {results.map((result) => {
                   const clusterInfo = getClusterLabel(result.cluster)
                   return (
-                    <TableRow key={result.id}>
-                      
-                      <TableCell>
-                        <Badge variant={clusterInfo.variant}>
-                          {clusterInfo.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {result.jarak_centroid != null && !isNaN(Number(result.jarak_centroid))
-                          ? Number(result.jarak_centroid).toFixed(4)
-                          : "-"}
-                      </TableCell>
-                      <TableCell>{result.algoritma}</TableCell>
-                      <TableCell>{result.jumlah_cluster}</TableCell>
-                    </TableRow>
+              <TableRow key={result.id}>
+                <TableCell>{result.nis || "-"}</TableCell>
+                <TableCell>{result.nama || "-"}</TableCell>
+                <TableCell>{result.kelas || "-"}</TableCell>
+                <TableCell>
+                  <Badge variant={clusterInfo.variant}>
+                    {clusterInfo.label}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {result.jarak_centroid != null && !isNaN(Number(result.jarak_centroid))
+                    ? Number(result.jarak_centroid).toFixed(4)
+                    : "-"}
+                </TableCell>
+                <TableCell>{result.algoritma}</TableCell>
+                <TableCell>{result.jumlah_cluster}</TableCell>
+              </TableRow>
                   )
                 })}
               </TableBody>

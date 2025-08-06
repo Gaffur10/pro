@@ -294,9 +294,9 @@ export const getClusteringResults = async (req, res) => {
     const results = rows.map(row => ({
       id: row.id,
       siswa_id: row.siswa_id,
-      nis: row.siswa.nis,
-      nama: row.siswa.nama,
-      kelas: row.siswa.kelas,
+      nis: row.siswa?.nis,
+      nama: row.siswa?.nama,
+      kelas: row.siswa?.kelas,
       cluster: row.cluster,
       keterangan: row.keterangan,
       jarak_centroid: row.jarak_centroid,

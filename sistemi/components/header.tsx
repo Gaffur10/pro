@@ -15,24 +15,7 @@ import {
 export function Header() {
   return (
     <header className="flex h-16 items-center justify-between border-b bg-white px-6">
-      {/* Logo */}
-      <div>
-        <img src="/logi.svg" alt="logi" className="h-8 w-auto" />
-      </div>
-
-      {/* Navigation */}
-      <nav role="navigation" className="flex items-center space-x-4">
-        <a href="/" className="text-gray-700 hover:text-gray-900">
-          Home
-        </a>
-        <a href="/about" className="text-gray-700 hover:text-gray-900">
-          About
-        </a>
-        <a href="/contact" className="text-gray-700 hover:text-gray-900">
-          Contact
-        </a>
-      </nav>
-
+           
       {/* Search and user controls */}
       <div className="flex items-center space-x-4">
         <div className="relative">
