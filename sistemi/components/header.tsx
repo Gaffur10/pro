@@ -15,7 +15,8 @@ import {
 export function Header() {
   return (
     <header className="flex h-16 items-center justify-between border-b bg-white px-6">
-           
+      {/* Placeholder for breadcrumbs or page title */}
+      <div></div>
       {/* Search and user controls */}
       <div className="flex items-center space-x-4">
         <div className="relative">

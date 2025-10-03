@@ -146,13 +146,17 @@ class ApiService {
     return this.request('/clustering/run', { method: 'POST', body: JSON.stringify(clusteringData) });
   }
   async getClusteringResults(params = {}) {
-    if (Object.keys(params).length === 0) params = { all: 'true' };
-    else if (!params.paginated) params.all = 'true';
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/clustering/results?${queryString}`);
   }
-  async getClusteringStats() { return this.request('/clustering/stats'); }
-  async clearClusteringResults() { return this.request('/clustering/clear', { method: 'DELETE' }); }
+  async getClusteringStats(params = {}) { 
+    const queryString = new URLSearchParams(params).toString();
+    return this.request(`/clustering/stats?${queryString}`); 
+}
+  async clearClusteringResults(params = {}) { 
+    const queryString = new URLSearchParams(params).toString();
+    return this.request(`/clustering/clear?${queryString}`, { method: 'DELETE' }); 
+  }
   async getElbowAnalysis(params = {}) {
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/clustering/elbow?${queryString}`);

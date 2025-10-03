@@ -190,12 +190,12 @@ export const runClustering = async (req, res) => {
 
 export const getClusteringResults = async (req, res) => {
   try {
-    const { page = 1, limit = 10, cluster = '', all = false } = req.query;
+    const { page = 1, limit = 10, cluster = '', all = false, semester, tahun_ajaran } = req.query;
     
     const whereClause = {};
-    if (cluster) {
-      whereClause.keterangan = cluster;
-    }
+    if (cluster) whereClause.keterangan = cluster;
+    if (semester) whereClause.semester = semester;
+    if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
 
     const processResults = async (results) => {
       if (results.length === 0) {
@@ -203,13 +203,11 @@ export const getClusteringResults = async (req, res) => {
       }
 
       const siswaIds = results.map(r => r.siswa_id);
-      const latestResult = results[0]; // Assuming the first result is the latest
-      const { semester, tahun_ajaran } = latestResult;
-
+      
+      // Menggunakan semester dan tahun_ajaran dari query, bukan dari hasil
       const nilaiWhereClause = {
         siswa_id: siswaIds,
       };
-
       if (semester) nilaiWhereClause.semester = semester;
       if (tahun_ajaran) nilaiWhereClause.tahun_ajaran = tahun_ajaran;
 
@@ -301,10 +299,15 @@ export const getClusteringResults = async (req, res) => {
 
 export const getClusteringStats = async (req, res) => {
   try {
-    const totalResults = await hasil_cluster.count();
+    const { semester, tahun_ajaran } = req.query;
+
+    const whereClause = {};
+    if (semester) whereClause.semester = semester;
+    if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
+
+    const totalResults = await hasil_cluster.count({ where: whereClause });
 
     if (totalResults === 0) {
-      // If there are no results, return a default empty state.
       return res.json({
         success: true,
         data: {
@@ -318,29 +321,28 @@ export const getClusteringStats = async (req, res) => {
     }
 
     const clusterStats = await hasil_cluster.findAll({
+      where: whereClause,
       attributes: [
         'keterangan',
         [Sequelize.fn('COUNT', Sequelize.col('id')), 'jumlah']
       ],
       group: ['keterangan'],
-      raw: true // Use raw: true to get plain objects
+      raw: true
     });
 
     const latestClustering = await hasil_cluster.findOne({
+      where: whereClause,
       order: [['created_at', 'DESC']],
     });
 
     const stats = {};
-    // Check if clusterStats is an array and not empty
     if (Array.isArray(clusterStats)) {
       clusterStats.forEach(stat => {
-        // With raw: true, we access properties directly
         if (stat && stat.keterangan) {
           const label = String(stat.keterangan).toLowerCase();
           const count = parseInt(stat.jumlah, 10) || 0;
           stats[label] = {
             count: count,
-            // Avoid division by zero
             percentage: totalResults > 0 ? ((count / totalResults) * 100).toFixed(1) : "0.0"
           };
         }
@@ -348,6 +350,7 @@ export const getClusteringStats = async (req, res) => {
     }
 
     const allDistances = await hasil_cluster.findAll({
+      where: whereClause,
       attributes: ['jarak_centroid'],
       raw: true
     });
@@ -383,19 +386,22 @@ export const getClusteringStats = async (req, res) => {
 
 export const clearClusteringResults = async (req, res) => {
   try {
-    const { semester, tahun_ajaran } = req.body;
+    const { semester, tahun_ajaran } = req.query; // Mengambil dari query string
 
     const whereClause = {};
-    if (semester) {
-      whereClause.semester = semester;
-    }
-    if (tahun_ajaran) {
-      whereClause.tahun_ajaran = tahun_ajaran;
+    // Hanya hapus semua jika tidak ada filter spesifik yang diberikan
+    if (semester) whereClause.semester = semester;
+    if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
+
+    if (Object.keys(whereClause).length === 0) {
+        // Jika tidak ada filter, hapus semua (perilaku lama, tapi sekarang eksplisit)
+        await hasil_cluster.destroy({ where: {}, truncate: true });
+    } else {
+        // Jika ada filter, hapus hanya yang cocok
+        await hasil_cluster.destroy({ where: whereClause });
     }
 
-    await hasil_cluster.destroy({ where: whereClause });
-
-    let message = 'Semua hasil clustering berhasil dihapus.';
+    let message = 'Hasil clustering berhasil dihapus.';
     if (semester && tahun_ajaran) {
       message = `Hasil clustering untuk semester ${semester} tahun ajaran ${tahun_ajaran} berhasil dihapus.`;
     } else if (semester) {
