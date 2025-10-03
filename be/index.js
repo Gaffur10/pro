@@ -6,7 +6,10 @@ import db from "./config/database.js";
 // Import models
 import User from "./model/userModel.js";
 import Siswa from "./model/siswaModel.js";
-import nilai_Siswa from "./model/nilai_siswa.js";
+import MataPelajaran from "./model/mapelModel.js";
+// import Kelas from "./model/kelasModel.js";
+import RiwayatUpload from "./model/riwayatUploadModel.js";
+import Nilai from "./model/nilaiModel.js";
 import hasil_cluster from "./model/hasil.js";
 
 // Import routes
@@ -14,8 +17,9 @@ import authRoutes from "./routes/authRoutes.js";
 import siswaRoutes from "./routes/siswaRoutes.js";
 import nilaiRoutes from "./routes/nilaiRoutes.js";
 import clusteringRoutes from "./routes/clusteringRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
+import userRoutes from './routes/userRoutes.js';
 import dashboardRoutes from "./routes/dashboardRoutes.js";
+import elbowRoutes from "./routes/elbowRoutes.js";
 
 dotenv.config();
 
@@ -35,8 +39,11 @@ try {
   } else {
     // Sync all models without force
     await User.sync();
+    await MataPelajaran.sync();
+    // await Kelas.sync();
     await Siswa.sync();
-    await nilai_Siswa.sync();
+    await Nilai.sync();
+    await RiwayatUpload.sync();
     await hasil_cluster.sync();
     console.log('All models synchronized successfully.');
   }
@@ -73,6 +80,15 @@ app.options("*", cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Middleware to log all incoming requests for debugging
+app.use((req, res, next) => {
+  console.log(`\n--- New Request ---`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  console.log('Request Body:', req.body);
+  console.log(`--- End Request ---\n`);
+  next();
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -83,6 +99,10 @@ app.get('/health', (req, res) => {
   });
 });
 
+import errorHandler from './middleware/errorHandler.js';
+
+// ... (kode lainnya)
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/siswa', siswaRoutes);
@@ -90,6 +110,7 @@ app.use('/api/nilai', nilaiRoutes);
 app.use('/api/clustering', clusteringRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/analysis', elbowRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -99,15 +120,8 @@ app.use('*', (req, res) => {
   });
 });
 
-// Error handler
-app.use((error, req, res, next) => {
-  console.error('Error:', error);
-  res.status(500).json({
-    success: false,
-    message: 'Terjadi kesalahan server',
-    error: process.env.NODE_ENV === 'development' ? error.message : undefined
-  });
-});
+// Centralized Error Handler
+app.use(errorHandler);
 
 // Start server
 app.listen(PORT, () => {

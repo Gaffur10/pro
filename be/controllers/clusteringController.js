@@ -1,226 +1,192 @@
+import { Sequelize } from 'sequelize';
 import hasil_cluster from '../model/hasil.js';
-import nilai_Siswa from '../model/nilai_siswa.js';
+import Nilai from '../model/nilaiModel.js'; // Ganti dengan model baru
 import Siswa from '../model/siswaModel.js';
-
-// Simple K-Means implementation
-function kMeans(data, k, maxIterations = 100) {
-  if (data.length === 0) return { clusters: [], centroids: [] };
-
-  // Initialize centroids randomly
-  let centroids = [];
-  for (let i = 0; i < k; i++) {
-    const randomIndex = Math.floor(Math.random() * data.length);
-    centroids.push(data[randomIndex].rata_rata);
-  }
-
-  let clusters = [];
-  let iterations = 0;
-
-  while (iterations < maxIterations) {
-    // Assign points to nearest centroid
-    clusters = data.map(point => {
-      let minDistance = Infinity;
-      let clusterIndex = 0;
-
-      centroids.forEach((centroid, index) => {
-        const distance = Math.abs(point.rata_rata - centroid);
-        if (distance < minDistance) {
-          minDistance = distance;
-          clusterIndex = index;
-        }
-      });
-
-      return {
-        ...point,
-        cluster: clusterIndex,
-        distance: minDistance
-      };
-    });
-
-    // Calculate new centroids
-    const newCentroids = [];
-    for (let i = 0; i < k; i++) {
-      const clusterPoints = clusters.filter(p => p.cluster === i);
-      if (clusterPoints.length > 0) {
-        const avg = clusterPoints.reduce((sum, p) => sum + p.rata_rata, 0) / clusterPoints.length;
-        newCentroids.push(avg);
-      } else {
-        newCentroids.push(centroids[i]);
-      }
-    }
-
-    // Check convergence
-    const centroidChange = centroids.every((centroid, i) => 
-      Math.abs(centroid - newCentroids[i]) < 0.001
-    );
-
-    if (centroidChange) break;
-
-    centroids = newCentroids;
-    iterations++;
-  }
-
-  return { clusters, centroids };
-}
+import MataPelajaran from '../model/mapelModel.js'; // Ganti dengan model baru
+import axios from 'axios';
 
 export const runClustering = async (req, res) => {
   try {
-    let { algoritma = 'kmeans', jumlah_cluster = 3, semester = '' } = req.body;
-
-    // Normalize algoritma parameter
-    if (algoritma === 'k-means') algoritma = 'kmeans';
-    
-
-    // Validate jumlah_cluster
+    // --- 1. Validasi Input ---
+    let { algoritma = 'kmeans', jumlah_cluster = 5, semester = '', tahun_ajaran = '' } = req.body;
     jumlah_cluster = parseInt(jumlah_cluster);
+
     if (isNaN(jumlah_cluster) || jumlah_cluster <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Jumlah cluster harus berupa angka positif'
-      });
+      return res.status(400).json({ message: 'Jumlah cluster harus berupa angka positif' });
     }
+    if (jumlah_cluster > 5) {
+      return res.status(400).json({ message: 'Jumlah cluster maksimal 5' });
+  }
 
-    // Get all nilai data
+    // --- 2. Persiapan Data ---
+    const allMapel = await MataPelajaran.findAll({ order: [['id', 'ASC']] });
+    const mapelOrder = allMapel.map(m => m.id);
+
     const whereClause = {};
-    if (semester) {
-      whereClause.semester = semester;
-    }
+    if (semester) whereClause.semester = semester;
+    if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
 
-    const nilaiData = await nilai_Siswa.findAll({
+    const nilaiData = await Nilai.findAll({
       where: whereClause,
       include: [
-        {
-          model: Siswa,
-          as: 'siswa',
-          attributes: ['id', 'nis', 'nama', 'kelas']
-        }
+        { model: Siswa, as: 'siswa', attributes: ['id', 'nis', 'nama', 'kelas'] },
       ],
-      order: [['created_at', 'DESC']]
+      order: [['siswa_id', 'ASC'], ['mapel_id', 'ASC']]
     });
 
     if (nilaiData.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tidak ada data nilai untuk diproses'
-      });
+      return res.status(400).json({ message: 'Tidak ada data nilai yang cocok dengan filter yang diberikan untuk diproses' });
     }
 
-    // Prepare data for clustering
-    const data = nilaiData.map(item => ({
-      id: item.id,
-      siswa_id: item.siswa_id,
-      rata_rata: parseFloat(item.rata_rata),
-      nis: item.siswa.nis,
-      nama: item.siswa.nama,
-      kelas: item.siswa.kelas,
-      semester: item.semester,
-      tahun_ajaran: item.tahun_ajaran
+    // --- 3. Transformasi Data (Pivot) ---
+    const pivotedData = nilaiData.reduce((acc, item) => {
+      if (!item.siswa) return acc;
+      const { siswa_id } = item;
+      if (!acc[siswa_id]) {
+        acc[siswa_id] = {
+          siswa_id: item.siswa_id,
+          nis: item.siswa.nis,
+          nama: item.siswa.nama,
+          kelas: item.siswa.kelas,
+          semester: item.semester,
+          tahun_ajaran: item.tahun_ajaran,
+          nilai: {}
+        };
+      }
+      acc[siswa_id].nilai[item.mapel_id] = parseFloat(item.nilai);
+      return acc;
+    }, {});
+
+    const dataForKMeans = Object.values(pivotedData).map(siswa => {
+      const vector = mapelOrder.map(mapelId => siswa.nilai[mapelId] || 0);
+      return { ...siswa, vector };
+    });
+    
+    if (dataForKMeans.length < jumlah_cluster) {
+      return res.status(400).json({ message: `Jumlah data siswa (${dataForKMeans.length}) kurang dari jumlah cluster (${jumlah_cluster})` });
+    }
+
+    // --- 4. Panggil Layanan Clustering (Flask) ---
+    const flaskRequestData = {
+      n_clusters: jumlah_cluster,
+      data: dataForKMeans.map(item => ({
+        id: item.siswa_id,
+        vector: item.vector
+      })),
+    };
+
+    const flaskResponse = await axios.post('http://localhost:5001/clustering', flaskRequestData);
+    const flaskResults = flaskResponse.data; // Hasilnya: [{id, cluster, distance}, ...]
+
+    // Buat Map untuk mencari hasil cluster & jarak per siswa dengan cepat.
+    const flaskResultMap = new Map(flaskResults.map(item => [item.id, { cluster: item.cluster, distance: item.distance }]));
+
+    // --- 5. PEMBARUAN: Pemberian Label Cluster Berdasarkan Ambang Batas (Threshold) ---
+    // Logika ini diubah dari sistem peringkat ke sistem ambang batas untuk memastikan
+    // label cluster (Tinggi, Sedang, Rendah) lebih akurat dan tidak bergantung pada
+    // perbandingan antar cluster, sehingga menyelesaikan bug salah pelabelan.
+
+    /**
+     * Fungsi helper untuk mendapatkan label cluster berdasarkan nilai rata-rata.
+     * @param {number} average - Nilai rata-rata sebuah cluster.
+     * @param {number} jumlah_cluster - Jumlah cluster yang dipilih pengguna.
+     * @returns {string} Label cluster (e.g., "Tinggi", "Sedang").
+     */
+    const getLabelForCluster = (average, jumlah_cluster) => {
+      switch (jumlah_cluster) {
+        case 5:
+          if (average > 90) return "Sangat Tinggi";
+          if (average > 80) return "Tinggi";
+          if (average > 70) return "Sedang";
+          if (average > 60) return "Rendah";
+          return "Sangat Rendah";
+        case 4:
+          if (average > 85) return "Sangat Tinggi";
+          if (average > 75) return "Tinggi";
+          if (average > 65) return "Sedang";
+          return "Rendah";
+        case 3:
+          if (average > 80) return "Tinggi";
+          if (average > 65) return "Sedang";
+          return "Rendah";
+        case 2:
+          if (average > 75) return "Tinggi";
+          return "Rendah";
+        default:
+          return "Cluster"; // Fallback jika jumlah cluster tidak terdefinisi
+      }
+    };
+
+    // Hitung rata-rata skor untuk setiap cluster yang dihasilkan oleh K-Means
+    const clustersTemp = {};
+    dataForKMeans.forEach(siswa => {
+        const resultData = flaskResultMap.get(siswa.siswa_id);
+        if (!resultData) return;
+
+        const { cluster: clusterIndex } = resultData;
+
+        if (!clustersTemp[clusterIndex]) {
+            clustersTemp[clusterIndex] = [];
+        }
+        const avgScore = siswa.vector.reduce((a, b) => a + b, 0) / siswa.vector.length;
+        clustersTemp[clusterIndex].push(avgScore);
+    });
+
+    const clusterAverages = Object.keys(clustersTemp).map(clusterIndex => {
+        const scores = clustersTemp[clusterIndex];
+        const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+        return { originalIndex: parseInt(clusterIndex), value: average };
+    });
+
+    // Buat pemetaan dari indeks cluster asli ke label yang sesuai menggunakan logika ambang batas
+    const clusterLabelMap = {};
+    clusterAverages.forEach(cluster => {
+      const { originalIndex, value } = cluster;
+      clusterLabelMap[originalIndex] = getLabelForCluster(value, jumlah_cluster);
+    });
+
+    // --- 6. Simpan Hasil ke Database ---
+    const resultsWithSiswa = dataForKMeans.map(originalSiswa => {
+      const resultData = flaskResultMap.get(originalSiswa.siswa_id);
+      return {
+        ...originalSiswa,
+        cluster: resultData ? resultData.cluster : null,
+        distance: resultData ? resultData.distance : 0, // Ambil jarak dari hasil Flask
+      };
+    });
+
+    // Hapus hasil clustering sebelumnya untuk semester & tahun ajaran yang spesifik
+    await hasil_cluster.destroy({ where: { semester, tahun_ajaran } });
+
+    const clusteringResultsToSave = resultsWithSiswa.map(c => ({
+      siswa_id: c.siswa_id,
+      // `cluster` menyimpan nomor cluster asli dari K-Means
+      cluster: c.cluster,
+      // `keterangan` diisi dengan label dari logika ambang batas yang baru
+      keterangan: clusterLabelMap[c.cluster],
+      jarak_centroid: c.distance, // Gunakan jarak yang sudah didapat
+      algoritma,
+      jumlah_cluster,
+      semester: c.semester,
+      tahun_ajaran: c.tahun_ajaran,
     }));
 
-    if (!data || data.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Tidak ada data siswa/nilai untuk clustering"
-      });
-    }
-    if (data.length < jumlah_cluster) {
-      return res.status(400).json({
-        success: false,
-        message: "Jumlah cluster melebihi jumlah data siswa"
-      });
-    }
+    await hasil_cluster.bulkCreate(clusteringResultsToSave);
 
-    // Run clustering
-    const { clusters, centroids } = kMeans(data, jumlah_cluster);
+    res.json({ success: true, message: 'Clustering berhasil dijalankan' });
 
-    // Determine cluster labels based on average values descending
-    const indexedCentroids = centroids.map((value, index) => ({ value, originalIndex: index }));
-    indexedCentroids.sort((a, b) => b.value - a.value);
-
-    const clusterLabels = {};
-    const clusterNumberMap = {}; // Map original centroid index to new cluster number (1-based)
-    indexedCentroids.forEach((indexedCentroid, newIndex) => {
-      const { originalIndex } = indexedCentroid;
-      clusterNumberMap[originalIndex] = newIndex + 1; // cluster number: 1 is highest centroid
-      if (newIndex === 0) clusterLabels[originalIndex] = 'Tinggi';
-      else if (newIndex === 1) clusterLabels[originalIndex] = 'Sedang';
-      else clusterLabels[originalIndex] = 'Rendah';
-    });
-
-    // Clear previous clustering results
-    await hasil_cluster.destroy({ where: {} });
-
-    // Save clustering results
-    const clusteringResults = clusters.map(cluster => {
-      const newClusterNumber = clusterNumberMap[cluster.cluster];
-      return {
-        siswa_id: cluster.siswa_id,
-        cluster: newClusterNumber,
-        keterangan: clusterLabels[cluster.cluster],
-        semester: cluster.semester,
-        tahun_ajaran: cluster.tahun_ajaran,
-        jarak_centroid: cluster.distance,
-        algoritma,
-        jumlah_cluster
-      };
-    });
-
-    await hasil_cluster.bulkCreate(clusteringResults);
-
-    // Prepare response data
-    const responseData = clusters.map(cluster => {
-      const newClusterNumber = clusterNumberMap[cluster.cluster];
-      return {
-        id: cluster.id,
-        siswa_id: cluster.siswa_id,
-        nis: cluster.nis,
-        nama: cluster.nama,
-        kelas: cluster.kelas,
-        rata_rata: cluster.rata_rata,
-        cluster: newClusterNumber,
-        keterangan: clusterLabels[cluster.cluster],
-        semester: cluster.semester,
-        tahun_ajaran: cluster.tahun_ajaran,
-        jarak_centroid: cluster.distance
-      };
-    });
-
-    // Calculate cluster statistics
-    const clusterStats = {};
-    Object.values(clusterLabels).forEach(label => {
-      const clusterData = responseData.filter(item => item.keterangan === label);
-      clusterStats[label.toLowerCase()] = {
-        count: clusterData.length,
-        percentage: ((clusterData.length / responseData.length) * 100).toFixed(1),
-        avg_rata_rata: clusterData.length > 0 
-          ? (clusterData.reduce((sum, item) => sum + item.rata_rata, 0) / clusterData.length).toFixed(2)
-          : 0
-      };
-    });
-
-    res.json({
-      success: true,
-      message: 'Clustering berhasil dijalankan',
-      data: {
-        results: responseData,
-        statistics: {
-          total_siswa: responseData.length,
-          jumlah_cluster,
-          algoritma,
-          cluster_stats: clusterStats,
-          centroids: centroids.map(c => c.toFixed(2))
-        }
-      }
-    });
   } catch (error) {
     console.error('Run clustering error:', error.message);
     console.error(error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server'
-    });
+    res.status(500).json({ success: false, message: error.message || 'Terjadi kesalahan server saat clustering' });
   }
 };
+
+
+// The getClusteringResults, getClusteringStats, and clearClusteringResults functions
+// can remain largely the same as they operate on the `hasil_cluster` table which
+// retains a similar structure. Small adjustments might be needed if the response
+// format from `runClustering` is different.
 
 export const getClusteringResults = async (req, res) => {
   try {
@@ -231,36 +197,65 @@ export const getClusteringResults = async (req, res) => {
       whereClause.keterangan = cluster;
     }
 
-    // If all=true or limit is very high, return all clustering results without pagination
-    if (all === 'true' || parseInt(limit) >= 1000) {
-      const results = await hasil_cluster.findAll({
-        where: whereClause,
-        include: [
-          {
-            model: Siswa,
-            as: 'siswa',
-            attributes: ['id', 'nis', 'nama', 'kelas']
-          }
-        ],
-        order: [['created_at', 'DESC']]
+    const processResults = async (results) => {
+      if (results.length === 0) {
+        return [];
+      }
+
+      const siswaIds = results.map(r => r.siswa_id);
+      const latestResult = results[0]; // Assuming the first result is the latest
+      const { semester, tahun_ajaran } = latestResult;
+
+      const nilaiWhereClause = {
+        siswa_id: siswaIds,
+      };
+
+      if (semester) nilaiWhereClause.semester = semester;
+      if (tahun_ajaran) nilaiWhereClause.tahun_ajaran = tahun_ajaran;
+
+      const allNilai = await Nilai.findAll({
+        where: nilaiWhereClause,
+        attributes: ['siswa_id', 'nilai'],
       });
 
-      const totalCount = await hasil_cluster.count({
-        where: whereClause
-      });
+      const nilaiMap = allNilai.reduce((acc, n) => {
+        if (!acc[n.siswa_id]) {
+          acc[n.siswa_id] = [];
+        }
+        acc[n.siswa_id].push(parseFloat(n.nilai));
+        return acc;
+      }, {});
 
-      const formattedResults = results.map(row => ({
+      const averageNilaiMap = Object.entries(nilaiMap).reduce((acc, [siswa_id, nilai_list]) => {
+        const avg = nilai_list.reduce((sum, val) => sum + val, 0) / nilai_list.length;
+        acc[siswa_id] = avg;
+        return acc;
+      }, {});
+
+      return results.map(row => ({
         id: row.id,
         siswa_id: row.siswa_id,
-        nis: row.siswa.nis,
-        nama: row.siswa.nama,
-        kelas: row.siswa.kelas,
+        nis: row.siswa?.nis,
+        nama: row.siswa?.nama,
+        kelas: row.siswa?.kelas,
         cluster: row.cluster,
         keterangan: row.keterangan,
         jarak_centroid: row.jarak_centroid,
         algoritma: row.algoritma,
-        jumlah_cluster: row.jumlah_cluster
+        jumlah_cluster: row.jumlah_cluster,
+        nilai_rata_rata: averageNilaiMap[row.siswa_id]?.toFixed(2) || 'N/A',
       }));
+    };
+
+    if (all === 'true' || parseInt(limit) >= 1000) {
+      const results = await hasil_cluster.findAll({
+        where: whereClause,
+        include: [{ model: Siswa, as: 'siswa', attributes: ['id', 'nis', 'nama', 'kelas'] }],
+        order: [['created_at', 'DESC']],
+      });
+
+      const formattedResults = await processResults(results);
+      const totalCount = await hasil_cluster.count({ where: whereClause });
 
       return res.json({
         success: true,
@@ -269,56 +264,37 @@ export const getClusteringResults = async (req, res) => {
           current_page: 1,
           total_pages: 1,
           total_items: totalCount,
-          items_per_page: totalCount
-        }
+          items_per_page: totalCount,
+        },
       });
     }
 
-    // Normal pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
-
     const { count, rows } = await hasil_cluster.findAndCountAll({
       where: whereClause,
-      include: [
-        {
-          model: Siswa,
-          as: 'siswa',
-          attributes: ['id', 'nis', 'nama', 'kelas']
-        }
-      ],
+      include: [{ model: Siswa, as: 'siswa', attributes: ['id', 'nis', 'nama', 'kelas'] }],
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
     });
 
-    const results = rows.map(row => ({
-      id: row.id,
-      siswa_id: row.siswa_id,
-      nis: row.siswa?.nis,
-      nama: row.siswa?.nama,
-      kelas: row.siswa?.kelas,
-      cluster: row.cluster,
-      keterangan: row.keterangan,
-      jarak_centroid: row.jarak_centroid,
-      algoritma: row.algoritma,
-      jumlah_cluster: row.jumlah_cluster
-    }));
+    const formattedResults = await processResults(rows);
 
     res.json({
       success: true,
-      data: results,
+      data: formattedResults,
       pagination: {
         current_page: parseInt(page),
         total_pages: Math.ceil(count / parseInt(limit)),
         total_items: count,
-        items_per_page: parseInt(limit)
-      }
+        items_per_page: parseInt(limit),
+      },
     });
   } catch (error) {
     console.error('Get clustering results error:', error);
     res.status(500).json({
       success: false,
-      message: 'Terjadi kesalahan server'
+      message: 'Terjadi kesalahan server',
     });
   }
 };
@@ -326,39 +302,63 @@ export const getClusteringResults = async (req, res) => {
 export const getClusteringStats = async (req, res) => {
   try {
     const totalResults = await hasil_cluster.count();
-    
+
+    if (totalResults === 0) {
+      // If there are no results, return a default empty state.
+      return res.json({
+        success: true,
+        data: {
+          total_results: 0,
+          cluster_distribution: {},
+          average_distance: 0,
+          algorithm_used: "N/A",
+          clusters_count: 0
+        }
+      });
+    }
+
     const clusterStats = await hasil_cluster.findAll({
       attributes: [
         'keterangan',
-        [hasil_cluster.sequelize.fn('COUNT', '*'), 'jumlah']
+        [Sequelize.fn('COUNT', Sequelize.col('id')), 'jumlah']
       ],
-      group: ['keterangan']
+      group: ['keterangan'],
+      raw: true // Use raw: true to get plain objects
     });
 
     const latestClustering = await hasil_cluster.findOne({
       order: [['created_at', 'DESC']],
-      attributes: ['algoritma', 'jumlah_cluster', 'created_at']
     });
 
     const stats = {};
-    clusterStats.forEach(stat => {
-      const label = stat.dataValues.keterangan.toLowerCase();
-      stats[label] = {
-        count: parseInt(stat.dataValues.jumlah),
-        percentage: ((parseInt(stat.dataValues.jumlah) / totalResults) * 100).toFixed(1)
-      };
+    // Check if clusterStats is an array and not empty
+    if (Array.isArray(clusterStats)) {
+      clusterStats.forEach(stat => {
+        // With raw: true, we access properties directly
+        if (stat && stat.keterangan) {
+          const label = String(stat.keterangan).toLowerCase();
+          const count = parseInt(stat.jumlah, 10) || 0;
+          stats[label] = {
+            count: count,
+            // Avoid division by zero
+            percentage: totalResults > 0 ? ((count / totalResults) * 100).toFixed(1) : "0.0"
+          };
+        }
+      });
+    }
+
+    const allDistances = await hasil_cluster.findAll({
+      attributes: ['jarak_centroid'],
+      raw: true
     });
 
-    // Calculate average distance from latest clustering results
     let averageDistance = 0;
-    if (latestClustering) {
-      const distances = await hasil_cluster.findAll({
-        attributes: ['jarak_centroid']
-      });
-      if (distances.length > 0) {
-        const totalDistance = distances.reduce((sum, d) => sum + parseFloat(d.jarak_centroid), 0);
-        averageDistance = totalDistance / distances.length;
-      }
+    if (Array.isArray(allDistances) && allDistances.length > 0) {
+      const totalDistance = allDistances.reduce((sum, item) => {
+        const distance = parseFloat(item.jarak_centroid);
+        return sum + (isNaN(distance) ? 0 : distance);
+      }, 0);
+      averageDistance = totalDistance / allDistances.length;
     }
 
     res.json({
@@ -371,6 +371,7 @@ export const getClusteringStats = async (req, res) => {
         clusters_count: latestClustering ? latestClustering.jumlah_cluster : 3
       }
     });
+
   } catch (error) {
     console.error('Get clustering stats error:', error);
     res.status(500).json({
@@ -382,11 +383,30 @@ export const getClusteringStats = async (req, res) => {
 
 export const clearClusteringResults = async (req, res) => {
   try {
-    await hasil_cluster.destroy({ where: {} });
+    const { semester, tahun_ajaran } = req.body;
+
+    const whereClause = {};
+    if (semester) {
+      whereClause.semester = semester;
+    }
+    if (tahun_ajaran) {
+      whereClause.tahun_ajaran = tahun_ajaran;
+    }
+
+    await hasil_cluster.destroy({ where: whereClause });
+
+    let message = 'Semua hasil clustering berhasil dihapus.';
+    if (semester && tahun_ajaran) {
+      message = `Hasil clustering untuk semester ${semester} tahun ajaran ${tahun_ajaran} berhasil dihapus.`;
+    } else if (semester) {
+      message = `Hasil clustering untuk semester ${semester} berhasil dihapus.`;
+    } else if (tahun_ajaran) {
+      message = `Hasil clustering untuk tahun ajaran ${tahun_ajaran} berhasil dihapus.`;
+    }
 
     res.json({
       success: true,
-      message: 'Hasil clustering berhasil dihapus'
+      message: message
     });
   } catch (error) {
     console.error('Clear clustering results error:', error);

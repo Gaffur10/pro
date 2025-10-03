@@ -1,44 +1,41 @@
 import express from 'express';
-import { 
-  getAllNilai, 
-  getNilaiById, 
-  createNilai, 
-  updateNilai, 
-  deleteNilai,
-  getNilaiStats
+import multer from 'multer';
+import {
+  getAllNilai,
+  createOrUpdateNilai,
+  deleteNilaiBySiswa,
+  getAllMapel,
+  createMapel, // <-- Add this import
+  getNilaiFilters,
+  uploadNilaiFromExcel
 } from '../controllers/nilaiController.js';
 import { verifyToken, verifyTeacher } from '../middleware/auth.js';
+import upload from '../middleware/upload.js';
 
 const router = express.Router();
 
-import { getDistinctTahunAjaran } from '../controllers/nilaiController.js';
-
-// All routes require authentication
+// All routes below require an authenticated user
 router.use(verifyToken);
 
-// Get all nilai with pagination and search
+// Route to upload and process an Excel file
+router.post('/upload', verifyTeacher, upload.single('file'), uploadNilaiFromExcel);
+
+// Get all subjects (mapel)
+router.get('/mapel', getAllMapel);
+
+// Create a new subject (mapel)
+router.post('/mapel', verifyTeacher, createMapel); // <-- Add this route
+
+// Get filters for nilai
+router.get('/filters', getNilaiFilters);
+
+// Get all grade data (paginated, searchable)
 router.get('/', getAllNilai);
 
-// Get nilai statistics
+// Create or Update a student's entire grade report for a semester
+router.post('/', verifyTeacher, createOrUpdateNilai);
 
-
-// New route to get distinct tahun ajaran
-router.get('/tahun-ajaran', getDistinctTahunAjaran);
-
-// Get single nilai
-router.get('/:id', getNilaiById);
-
-// Create new nilai (requires teacher/admin role)
-router.post('/', verifyTeacher, createNilai);
-
-// Update nilai (requires teacher/admin role)
-router.put('/:id', verifyTeacher, updateNilai);
-
-// Delete nilai (requires teacher/admin role)
-router.delete('/:id', verifyTeacher, deleteNilai);
-
-// Get nilai statistics
-router.get('/stats', getNilaiStats);
-
+// Delete a student's entire grade report for a semester
+router.delete('/', verifyTeacher, deleteNilaiBySiswa);
 
 export default router; 

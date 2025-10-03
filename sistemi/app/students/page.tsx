@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"  
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,22 +18,18 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Search, Edit, Trash2, Download, ChevronLeft, ChevronRight } from "lucide-react"
 import apiService from "@/lib/api"
 import { StudentsLoading } from "@/components/students-loading"
 import { ToastContainer } from "@/components/ui/toast"
 import { useToast } from "@/hooks/use-toast"
+import { debounce } from "lodash"
 
 interface Siswa {
   id: number
   nis: string
   nama: string
   kelas: string
-  jenis_kelamin: string
-  tanggal_lahir: string
-  alamat: string
-  telepon: string
   created_at: string
   updated_at: string
 }
@@ -56,39 +52,31 @@ export default function StudentsPage() {
     current_page: 1,
     total_pages: 1,
     total_items: 0,
-    items_per_page: 50
+    items_per_page: 10,
   })
   const [formData, setFormData] = useState({
     nis: "",
     nama: "",
     kelas: "",
-    jenis_kelamin: "",
-    tanggal_lahir: "",
-    alamat: "",
-    telepon: "",
   })
   const { toasts, addToast, removeToast } = useToast()
 
-  useEffect(() => {
-    fetchStudents()
-  }, [])
 
-  const fetchStudents = async (page = 1, search = "") => {
+  const fetchStudents = useCallback(async (page = 1, search = "") => {
     try {
       setLoading(true)
       setError("")
       
       const params = {
         page: page.toString(),
-        limit: "1000", // Get all students without pagination
-        search: search
+        limit: pagination.items_per_page.toString(),
+        search: search,
       }
       const response = await apiService.getSiswa(params)
       setStudents(response.data)
       if (response.pagination) {
         setPagination(response.pagination)
       }
-      addToast(`Berhasil memuat ${response.data.length} data siswa`, 'success')
     } catch (error: any) {
       const errorMessage = error.message || "Gagal memuat data siswa"
       setError(errorMessage)
@@ -96,23 +84,21 @@ export default function StudentsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [pagination.items_per_page, addToast])
+
+  useEffect(() => {
+    fetchStudents(1, searchTerm)
+  }, [fetchStudents, searchTerm])
+
+  const debouncedFetchStudents = useCallback(debounce(fetchStudents, 300), [fetchStudents])
 
   const handleSearch = (value: string) => {
     setSearchTerm(value)
-    fetchStudents(1, value)
   }
 
   const handlePageChange = (page: number) => {
     fetchStudents(page, searchTerm)
   }
-
-  const filteredStudents = students.filter(
-    (student) =>
-      student.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.nis.includes(searchTerm) ||
-      student.kelas.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -128,7 +114,7 @@ export default function StudentsPage() {
       setIsDialogOpen(false)
       setEditingStudent(null)
       resetForm()
-      fetchStudents() // Refresh data
+      fetchStudents(pagination.current_page, searchTerm)
     } catch (error: any) {
       const errorMessage = error.message || "Gagal menyimpan data siswa"
       setError(errorMessage)
@@ -142,10 +128,6 @@ export default function StudentsPage() {
       nis: student.nis,
       nama: student.nama,
       kelas: student.kelas,
-      jenis_kelamin: student.jenis_kelamin,
-      tanggal_lahir: student.tanggal_lahir,
-      alamat: student.alamat,
-      telepon: student.telepon,
     })
     setIsDialogOpen(true)
   }
@@ -155,7 +137,7 @@ export default function StudentsPage() {
       try {
         await apiService.deleteSiswa(id)
         addToast('Data siswa berhasil dihapus', 'success')
-        fetchStudents() // Refresh data
+        fetchStudents(pagination.current_page, searchTerm)
       } catch (error: any) {
         const errorMessage = error.message || "Gagal menghapus siswa"
         setError(errorMessage)
@@ -169,19 +151,18 @@ export default function StudentsPage() {
       nis: "",
       nama: "",
       kelas: "",
-      jenis_kelamin: "",
-      tanggal_lahir: "",
-      alamat: "",
-      telepon: "",
     })
   }
 
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
+      const response = await apiService.getSiswa({ all: 'true' });
+      const allStudents = response.data;
+
       const csvContent =
         "data:text/csv;charset=utf-8," +
-        "NIS,Nama,Kelas,Jenis Kelamin,Tanggal Lahir,Alamat,Telepon\n" +
-        students.map((s) => `${s.nis},${s.nama},${s.kelas},${s.jenis_kelamin},${s.tanggal_lahir},${s.alamat},${s.telepon}`).join("\n")
+        "NIS,Nama,Kelas\n" +
+        allStudents.map((s: Siswa) => `${s.nis},${s.nama},${s.kelas}`).join("\n")
 
       const encodedUri = encodeURI(csvContent)
       const link = document.createElement("a")
@@ -259,68 +240,19 @@ export default function StudentsPage() {
                           required
                         />
                       </div>
+                      
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4">
                       <div className="grid gap-2">
                         <Label htmlFor="kelas">Kelas</Label>
-                        <Select
+                        <Input
+                          id="kelas"
                           value={formData.kelas}
-                          onValueChange={(value) => setFormData({ ...formData, kelas: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Pilih kelas" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="VII Kelas A">VII Kelas A</SelectItem>
-                            <SelectItem value="VIII Kelas A">VIII Kelas A</SelectItem>
-                            <SelectItem value="VIII Kelas B">VIII Kelas B</SelectItem>
-                            <SelectItem value="IX Kelas A">IX Kelas A</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          onChange={(e) => setFormData({ ...formData, kelas: e.target.value })}
+                          placeholder="Masukkan kelas (contoh: VII-A)"
+                          required
+                        />
                       </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="jenis_kelamin">Jenis Kelamin</Label>
-                        <Select
-                          value={formData.jenis_kelamin}
-                          onValueChange={(value) => setFormData({ ...formData, jenis_kelamin: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Pilih jenis kelamin" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="L">Laki-laki</SelectItem>
-                            <SelectItem value="P">Perempuan</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="tanggal_lahir">Tanggal Lahir</Label>
-                      <Input
-                        id="tanggal_lahir"
-                        type="date"
-                        value={formData.tanggal_lahir}
-                        onChange={(e) => setFormData({ ...formData, tanggal_lahir: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="alamat">Alamat</Label>
-                      <Input
-                        id="alamat"
-                        value={formData.alamat}
-                        onChange={(e) => setFormData({ ...formData, alamat: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="telepon">Nomor Telepon</Label>
-                      <Input
-                        id="telepon"
-                        value={formData.telepon}
-                        onChange={(e) => setFormData({ ...formData, telepon: e.target.value })}
-                        required
-                      />
                     </div>
                   </div>
                   <DialogFooter>
@@ -368,24 +300,18 @@ export default function StudentsPage() {
                   <TableHead>NIS</TableHead>
                   <TableHead>Nama</TableHead>
                   <TableHead>Kelas</TableHead>
-                  <TableHead>Jenis Kelamin</TableHead>
-                  <TableHead>Tanggal Lahir</TableHead>
-                  <TableHead>Telepon</TableHead>
                   <TableHead>Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredStudents.length > 0 ? (
-                  filteredStudents.map((student) => (
+                {students.length > 0 ? (
+                  students.map((student) => (
                     <TableRow key={student.id}>
                       <TableCell className="font-medium">{student.nis}</TableCell>
                       <TableCell>{student.nama}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{student.kelas}</Badge>
                       </TableCell>
-                      <TableCell>{student.jenis_kelamin === "L" ? "Laki-laki" : "Perempuan"}</TableCell>
-                      <TableCell>{student.tanggal_lahir}</TableCell>
-                      <TableCell>{student.telepon}</TableCell>
                       <TableCell>
                         <div className="flex items-center space-x-2">
                           <Button variant="ghost" size="sm" onClick={() => handleEdit(student)}>
@@ -405,7 +331,7 @@ export default function StudentsPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={4} className="text-center py-8 text-gray-500">
                       {searchTerm ? "Tidak ada siswa yang ditemukan" : "Belum ada data siswa"}
                     </TableCell>
                   </TableRow>

@@ -6,7 +6,19 @@ const router = express.Router();
 
 // Public routes
 router.post('/login', login);
-router.post('/register', register);
+import { body } from 'express-validator';
+
+// Public routes
+router.post('/login', login);
+router.post(
+    '/register', 
+    [
+        body('nama', 'Nama tidak boleh kosong').notEmpty(),
+        body('email', 'Format email tidak valid').isEmail(),
+        body('password', 'Password minimal 6 karakter').isLength({ min: 6 })
+    ],
+    register
+);
 
 // Protected routes
 router.get('/profile', verifyToken, getProfile);

@@ -4,13 +4,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const db = new Sequelize(
-  process.env.DB_NAME || "ta", 
+  process.env.DB_NAME || "db_app", 
   process.env.DB_USER || "root", 
   process.env.DB_PASSWORD || "", 
   {
     host: process.env.DB_HOST || "localhost",
     dialect: "mysql",
-    logging: false,
+    logging: console.log,
     pool: {
       max: 5,
       min: 0,

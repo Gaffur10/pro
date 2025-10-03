@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Users, GraduationCap, FileText, BarChart3, LogOut } from "lucide-react"
+import { LayoutDashboard, Users, GraduationCap, FileText, BarChart3, LogOut, TrendingUp } from "lucide-react"
 
 const navigation = [
   {
@@ -26,6 +26,11 @@ const navigation = [
     name: "Data Nilai",
     href: "/grades",
     icon: FileText,
+  },
+  {
+    name: "Analisis Elbow",
+    href: "/elbow-analysis",
+    icon: TrendingUp,
   },
   {
     name: "Hasil Clustering",

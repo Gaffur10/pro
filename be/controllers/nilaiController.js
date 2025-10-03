@@ -1,368 +1,371 @@
-import { Op } from 'sequelize';
-import nilai_Siswa from '../model/nilai_siswa.js';
+import { Op, Sequelize } from 'sequelize';
+import * as xlsx from 'xlsx';
+import Nilai from '../model/nilaiModel.js';
 import Siswa from '../model/siswaModel.js';
+import MataPelajaran from '../model/mapelModel.js';
+import db from '../config/database.js';
+
+
+// Endpoint baru untuk mengambil semua mata pelajaran
+export const getAllMapel = async (req, res) => {
+  try {
+    const mapel = await MataPelajaran.findAll({ order: [['nama_mapel', 'ASC']] });
+    res.json({ success: true, data: mapel });
+  } catch (error) {
+    console.error('Get all mapel error:', error);
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
+  }
+};
+
+export const createMapel = async (req, res) => {
+  const { nama_mapel } = req.body;
+
+  if (!nama_mapel || nama_mapel.trim() === '') {
+    return res.status(400).json({ success: false, message: 'Nama mata pelajaran tidak boleh kosong.' });
+  }
+
+  try {
+    // Check for existing subject (case-insensitive)
+    const existingMapel = await MataPelajaran.findOne({
+      where: Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('nama_mapel')), Sequelize.fn('LOWER', nama_mapel.trim()))
+    });
+
+    if (existingMapel) {
+      return res.status(409).json({ success: false, message: 'Mata pelajaran dengan nama tersebut sudah ada.' });
+    }
+
+    const newMapel = await MataPelajaran.create({ nama_mapel: nama_mapel.trim() });
+    res.status(201).json({ success: true, message: 'Mata pelajaran berhasil ditambahkan.', data: newMapel });
+  } catch (error) {
+    console.error('Create mapel error:', error);
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server saat menambahkan mata pelajaran.' });
+  }
+};
 
 export const getAllNilai = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '', semester = '', all = false } = req.query;
-    
-    const whereClause = {};
-    if (search) {
-      whereClause['$siswa.nama$'] = { [Op.like]: `%${search}%` };
-    }
-    if (semester) {
-      whereClause.semester = semester;
-    }
-
-    // If all=true or limit is very high, return all nilai without pagination
-    if (all === 'true' || parseInt(limit) >= 1000) {
-      const nilai = await nilai_Siswa.findAll({
-        where: whereClause,
-        include: [
-          {
-            model: Siswa,
-            as: 'siswa',
-            attributes: ['id', 'nis', 'nama', 'kelas']
-          }
-        ],
-        order: [['created_at', 'DESC']]
-      });
-
-      const totalCount = await nilai_Siswa.count({
-        where: whereClause,
-        include: [
-          {
-            model: Siswa,
-            as: 'siswa',
-            attributes: ['id', 'nis', 'nama', 'kelas']
-          }
-        ]
-      });
-
-      return res.json({
-        success: true,
-        data: nilai,
-        pagination: {
-          current_page: 1,
-          total_pages: 1,
-          total_items: totalCount,
-          items_per_page: totalCount
-        }
-      });
-    }
-
-    // Normal pagination
+    const { page = 1, limit = 10, search = '', semester = '', tahun_ajaran = '', all = 'false' } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const { count, rows } = await nilai_Siswa.findAndCountAll({
+    // 1. Build a subquery to find distinct grade reports (siswa_id, semester, tahun_ajaran)
+    // and filter them by student name if there is a search term.
+    let whereClause = {};
+    if (semester) whereClause.semester = semester;
+    if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
+
+    let siswaWhereClause = {};
+    if (search) {
+      siswaWhereClause.nama = { [Op.like]: `%${search}%` };
+    }
+
+    // 2. Find all distinct reports that match the criteria
+    const distinctReports = await Nilai.findAll({
       where: whereClause,
-      include: [
-        {
-          model: Siswa,
-          as: 'siswa',
-          attributes: ['id', 'nis', 'nama', 'kelas']
-        }
+      attributes: [
+        'siswa_id',
+        'semester',
+        'tahun_ajaran',
+        [db.fn('MAX', db.col('nilai.created_at')), 'latest_created_at']
       ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      include: [{
+        model: Siswa,
+        as: 'siswa',
+        where: siswaWhereClause,
+        attributes: []
+      }],
+      group: ['siswa_id', 'semester', 'tahun_ajaran'],
+      order: [[db.fn('MAX', db.col('nilai.created_at')), 'DESC']],
+      raw: true
+    });
+
+    const totalItems = distinctReports.length;
+    if (totalItems === 0) {
+      return res.json({ success: true, data: [], pagination: { total_items: 0, total_pages: 0, current_page: 1 } });
+    }
+
+    // 3. Paginate the reports if not fetching all
+    const reportsToProcess = all === 'true' ? distinctReports : distinctReports.slice(offset, offset + parseInt(limit));
+    const siswaIdsForPage = reportsToProcess.map(r => r.siswa_id);
+
+    // 4. Fetch full grade data for the reports on the current page
+    const nilaiData = await Nilai.findAll({
+      where: {
+        siswa_id: { [Op.in]: siswaIdsForPage }
+      },
+      include: [
+        { model: Siswa, as: 'siswa', attributes: ['nis', 'nama', 'kelas'] },
+        { model: MataPelajaran, as: 'mata_pelajaran', attributes: ['nama_mapel'] }
+      ],
       order: [['created_at', 'DESC']]
+    });
+
+    // 5. Group the results by student report for a clean output
+    const groupedBySiswa = reportsToProcess.map(report => {
+      const siswaData = nilaiData.find(n => n.siswa_id === report.siswa_id)?.siswa;
+      const nilaiForSiswa = nilaiData
+        .filter(n => n.siswa_id === report.siswa_id && n.semester === report.semester && n.tahun_ajaran === report.tahun_ajaran)
+        .map(n => ({
+          mapel_id: n.mapel_id,
+          nama_mapel: n.mata_pelajaran.nama_mapel,
+          nilai: n.nilai
+        }));
+
+      return {
+        siswa_id: report.siswa_id,
+        nis: siswaData?.nis,
+        nama: siswaData?.nama,
+        kelas: siswaData?.kelas,
+        semester: report.semester,
+        tahun_ajaran: report.tahun_ajaran,
+        nilai: nilaiForSiswa
+      };
     });
 
     res.json({
       success: true,
-      data: rows,
+      data: groupedBySiswa,
       pagination: {
-        current_page: parseInt(page),
-        total_pages: Math.ceil(count / parseInt(limit)),
-        total_items: count,
-        items_per_page: parseInt(limit)
+        total_items: totalItems,
+        total_pages: all === 'true' ? 1 : Math.ceil(totalItems / parseInt(limit)),
+        current_page: all === 'true' ? 1 : parseInt(page),
       }
     });
   } catch (error) {
     console.error('Get all nilai error:', error);
-    console.error(error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
   }
 };
 
-export const getNilaiById = async (req, res) => {
+
+export const createOrUpdateNilai = async (req, res) => {
+  const t = await db.transaction();
   try {
-    const { id } = req.params;
-    
-    const nilai = await nilai_Siswa.findByPk(id, {
-      include: [
-        {
-          model: Siswa,
-          as: 'siswa',
-          attributes: ['id', 'nis', 'nama', 'kelas', 'jenis_kelamin']
+    const {
+      siswa_id,
+      semester,
+      tahun_ajaran,
+      nilai // expected to be an array of { mapel_id: x, nilai: y }
+    } = req.body;
+
+    if (!siswa_id || !semester || !tahun_ajaran || !Array.isArray(nilai)) {
+      return res.status(400).json({ message: 'Input tidak valid. Pastikan semua field terisi.' });
+    }
+
+    // Delete existing nilai for this student and semester/tahun_ajaran
+    await Nilai.destroy({
+      where: { siswa_id, semester, tahun_ajaran },
+      transaction: t
+    });
+
+    // Prepare data for bulk insert
+    const nilaiToCreate = nilai.map(n => {
+      if (n.nilai === null || n.nilai === '' || isNaN(parseFloat(n.nilai))) {
+        throw new Error(`Nilai untuk mapel_id ${n.mapel_id} tidak valid.`);
+      }
+      return {
+        siswa_id,
+        semester,
+        tahun_ajaran,
+        mapel_id: n.mapel_id,
+        nilai: parseFloat(n.nilai)
+      };
+    });
+
+    // Bulk insert new nilai
+    const createdNilai = await Nilai.bulkCreate(nilaiToCreate, { transaction: t, validate: true });
+
+    await t.commit();
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Data nilai berhasil disimpan', 
+      data: createdNilai 
+    });
+
+  } catch (error) {
+    await t.rollback();
+    console.error('Create/Update nilai error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Terjadi kesalahan server' });
+  }
+};
+
+export const uploadNilaiFromExcel = async (req, res) => {
+  const { kelas, tahun_ajaran, semester } = req.body;
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'Tidak ada file yang diunggah.' });
+  }
+  if (!kelas || !tahun_ajaran || !semester) {
+    return res.status(400).json({ success: false, message: 'Input Kelas, Tahun Ajaran, dan Semester tidak boleh kosong.' });
+  }
+
+  const t = await db.transaction();
+  try {
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const jsonData = xlsx.utils.sheet_to_json(worksheet);
+
+    if (jsonData.length > 0) {
+      console.log('[DIAGNOSTIK] Nama kolom dari Excel (setelah normalisasi):', Object.keys(jsonData[0]).map(h => h.toLowerCase().replace(/\s+/g, '')));
+    }
+
+    if (jsonData.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'File Excel kosong atau format tidak sesuai.' });
+    }
+
+    // 1. Get all subjects to map names to IDs
+    const allMapel = await MataPelajaran.findAll({ transaction: t });
+    const mapelNameToId = allMapel.reduce((acc, mapel) => {
+      // Normalize names for comparison (e.g., lowercase and remove spaces)
+      acc[mapel.nama_mapel.toLowerCase().replace(/\s+/g, '')] = mapel.id;
+      return acc;
+    }, {});
+
+    const errors = [];
+    const nilaiToCreate = [];
+    const studentsToProcess = new Map(); // To track which students' grades are being updated
+
+    for (const [index, row] of jsonData.entries()) {
+      const nis = row.NIS?.toString();
+      const namaSiswa = row.Nama?.toString();
+
+      if (!nis || !namaSiswa) {
+        errors.push(`Baris ${index + 2}: Kolom NIS atau Nama tidak boleh kosong.`);
+        continue;
+      }
+
+      let siswa = await Siswa.findOne({ where: { nis }, transaction: t });
+
+      if (!siswa) {
+        try {
+          siswa = await Siswa.create({
+            nis,
+            nama: namaSiswa,
+            kelas, // Use class from form input
+            // Provide sensible defaults for other required fields
+            jenis_kelamin: 'L', 
+            tanggal_lahir: new Date(),
+            alamat: 'Belum diisi',
+            telepon: '0000',
+          }, { transaction: t });
+        } catch (validationError) {
+          errors.push(`Baris ${index + 2}: Gagal membuat siswa baru untuk NIS ${nis}. Error: ${validationError.message}`);
+          continue;
         }
-      ]
-    });
+      }
 
-    if (!nilai) {
-      return res.status(404).json({
-        success: false,
-        message: 'Data nilai tidak ditemukan'
+      // Mark this student for grade deletion to ensure a clean update
+      if (!studentsToProcess.has(siswa.id)) {
+          studentsToProcess.set(siswa.id, { semester, tahun_ajaran });
+      }
+
+      // Iterate over columns in the row to find subject grades
+      for (const colName in row) {
+        if (colName.toLowerCase() === 'nis' || colName.toLowerCase() === 'nama') continue;
+
+        const normalizedColName = colName.toLowerCase().replace(/\s+/g, '');
+        const mapelId = mapelNameToId[normalizedColName];
+        
+        if (mapelId) {
+          const nilai = parseFloat(row[colName]);
+          if (row[colName] !== null && !isNaN(nilai)) {
+            nilaiToCreate.push({
+              siswa_id: siswa.id,
+              mapel_id: mapelId,
+              semester,
+              tahun_ajaran,
+              nilai,
+            });
+          } else if (row[colName] !== null && row[colName] !== '') {
+            // Handle cases where the value is present but not a valid number
+            errors.push(`Baris ${index + 2}: Nilai untuk mata pelajaran '${colName}' (${row[colName]}) tidak valid.`);
+          }
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      await t.rollback();
+      // Return a 422 Unprocessable Entity status for validation errors
+      return res.status(422).json({ 
+        success: false, 
+        message: 'Ditemukan kesalahan validasi pada file. Tidak ada data yang disimpan.', 
+        errors 
       });
     }
 
-    res.json({
-      success: true,
-      data: nilai
+    // Delete existing grades for all students in the file for the given semester/year
+    for (const [siswa_id, period] of studentsToProcess.entries()) {
+        await Nilai.destroy({ 
+            where: { 
+                siswa_id: siswa_id, 
+                semester: period.semester, 
+                tahun_ajaran: period.tahun_ajaran 
+            }, 
+            transaction: t 
+        });
+    }
+
+    // Bulk create new grades
+    if (nilaiToCreate.length > 0) {
+      await Nilai.bulkCreate(nilaiToCreate, { transaction: t });
+    }
+
+    await t.commit();
+    res.status(201).json({ 
+      success: true, 
+      message: `Upload berhasil. ${nilaiToCreate.length} data nilai telah berhasil diimpor/diperbarui.`,
     });
+
   } catch (error) {
-    console.error('Get nilai by id error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server'
-    });
+    await t.rollback();
+    console.error('Upload Excel error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Terjadi kesalahan server saat memproses file.' });
   }
 };
 
-export const createNilai = async (req, res) => {
-  try {
-    const {
-      siswa_id,
-      semester,
-      tahun_ajaran,
-      Matematika,
-      PKN,
-      Seni_Budaya,
-      ipa,
-      Bahasa_Indonesia,
-      Bahasa_Inggris,
-      PJOK,
-      IPS,
-      Pend_Agama,
-      TIK
-    } = req.body;
 
+export const deleteNilaiBySiswa = async (req, res) => {
+  try {
+    const { siswa_id, semester, tahun_ajaran } = req.query;
     if (!siswa_id || !semester || !tahun_ajaran) {
-      return res.status(400).json({
-        success: false,
-        message: 'ID siswa, semester, dan tahun ajaran harus diisi'
-      });
+        return res.status(400).json({ message: 'Parameter siswa_id, semester, dan tahun_ajaran diperlukan' });
     }
 
-    // Check if siswa exists
-    const siswa = await Siswa.findByPk(siswa_id);
-    if (!siswa) {
-      return res.status(404).json({
-        success: false,
-        message: 'Siswa tidak ditemukan'
-      });
+    const result = await Nilai.destroy({ where: { siswa_id, semester, tahun_ajaran } });
+
+    if (result === 0) {
+        return res.status(404).json({ success: false, message: 'Data nilai tidak ditemukan' });
     }
 
-    // Check if nilai already exists for this siswa and semester
-    const existingNilai = await nilai_Siswa.findOne({
-      where: { siswa_id, semester }
-    });
-    if (existingNilai) {
-      return res.status(400).json({
-        success: false,
-        message: 'Data nilai untuk siswa dan semester ini sudah ada'
-      });
-    }
-
-    // Calculate average
-    const nilaiArray = [
-      Matematika,
-      PKN,
-      Seni_Budaya,
-      ipa,
-      Bahasa_Indonesia,
-      Bahasa_Inggris,
-      PJOK,
-      IPS,
-      Pend_Agama,
-      TIK
-    ].filter(nilai => nilai !== null && nilai !== undefined && nilai !== '');
-
-    const rata_rata = nilaiArray.length > 0 
-      ? (nilaiArray.reduce((sum, nilai) => sum + parseFloat(nilai), 0) / nilaiArray.length).toFixed(2)
-      : 0;
-
-    const nilai = await nilai_Siswa.create({
-      siswa_id,
-      semester,
-      tahun_ajaran,
-      Matematika: Matematika || null,
-      PKN: PKN || null,
-      Seni_Budaya: Seni_Budaya || null,
-      ipa: ipa || null,
-      Bahasa_Indonesia: Bahasa_Indonesia || null,
-      Bahasa_Inggris: Bahasa_Inggris || null,
-      PJOK: PJOK || null,
-      IPS: IPS || null,
-      Pend_Agama: Pend_Agama || null,
-      TIK: TIK || null,
-      rata_rata
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Data nilai berhasil ditambahkan',
-      data: nilai
-    });
-  } catch (error) {
-    console.error('Create nilai error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server'
-    });
-  }
-};
-
-export const updateNilai = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      semester,
-      tahun_ajaran,
-      Matematika,
-      PKN,
-      Seni_Budaya,
-      ipa,
-      Bahasa_Indonesia,
-      Bahasa_Inggris,
-      PJOK,
-      IPS,
-      Pend_Agama,
-      TIK
-    } = req.body;
-
-    const nilai = await nilai_Siswa.findByPk(id);
-    if (!nilai) {
-      return res.status(404).json({
-        success: false,
-        message: 'Data nilai tidak ditemukan'
-      });
-    }
-
-    // Calculate new average
-    const nilaiArray = [
-      Matematika,
-      PKN,
-      Seni_Budaya,
-      ipa,
-      Bahasa_Indonesia,
-      Bahasa_Inggris,
-      PJOK,
-      IPS,
-      Pend_Agama,
-      TIK
-    ].filter(n => n !== null && n !== undefined && n !== '');
-
-    const rata_rata = nilaiArray.length > 0 
-      ? (nilaiArray.reduce((sum, n) => sum + parseFloat(n), 0) / nilaiArray.length).toFixed(2)
-      : 0;
-
-    await nilai.update({
-      semester: semester || nilai.semester,
-      tahun_ajaran: tahun_ajaran || nilai.tahun_ajaran,
-      Matematika: Matematika !== undefined ? Matematika : nilai.Matematika,
-      PKN: PKN !== undefined ? PKN : nilai.PKN,
-      Seni_Budaya: Seni_Budaya !== undefined ? Seni_Budaya : nilai.Seni_Budaya,
-      ipa: ipa !== undefined ? ipa : nilai.ipa,
-      Bahasa_Indonesia: Bahasa_Indonesia !== undefined ? Bahasa_Indonesia : nilai.Bahasa_Indonesia,
-      Bahasa_Inggris: Bahasa_Inggris !== undefined ? Bahasa_Inggris : nilai.Bahasa_Inggris,
-      PJOK: PJOK !== undefined ? PJOK : nilai.PJOK,
-      IPS: IPS !== undefined ? IPS : nilai.IPS,
-      Pend_Agama: Pend_Agama !== undefined ? Pend_Agama : nilai.Pend_Agama,
-      TIK: TIK !== undefined ? TIK : nilai.TIK,
-      rata_rata
-    });
-
-    res.json({
-      success: true,
-      message: 'Data nilai berhasil diperbarui',
-      data: nilai
-    });
-  } catch (error) {
-    console.error('Update nilai error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server'
-    });
-  }
-};
-
-export const deleteNilai = async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    const nilai = await nilai_Siswa.findByPk(id);
-    if (!nilai) {
-      return res.status(404).json({
-        success: false,
-        message: 'Data nilai tidak ditemukan'
-      });
-    }
-
-    await nilai.destroy();
-
-    res.json({
-      success: true,
-      message: 'Data nilai berhasil dihapus'
-    });
+    res.json({ success: true, message: 'Semua data nilai untuk siswa pada periode ini berhasil dihapus' });
   } catch (error) {
     console.error('Delete nilai error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server'
-    });
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
   }
 };
 
-
-export const getDistinctTahunAjaran = async (req, res) => {
+export const getNilaiFilters = async (req, res) => {
   try {
-    const distinctTahunAjaran = await nilai_Siswa.findAll({
-      attributes: [
-        [nilai_Siswa.sequelize.fn('DISTINCT', nilai_Siswa.sequelize.col('tahun_ajaran')), 'tahun_ajaran']
-      ],
-      order: [['tahun_ajaran', 'DESC']]
+    const tahunAjaran = await Nilai.findAll({
+      attributes: [[db.fn('DISTINCT', db.col('tahun_ajaran')), 'tahun_ajaran']],
+      order: [['tahun_ajaran', 'DESC']],
+    });
+    const semester = await Nilai.findAll({
+      attributes: [[db.fn('DISTINCT', db.col('semester')), 'semester']],
+      order: [['semester', 'ASC']],
     });
 
-    res.json({
-      success: true,
-      data: distinctTahunAjaran.map(item => item.tahun_ajaran)
-    });
-  } catch (error) {
-    console.error('Get distinct tahun ajaran error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server'
-    });
-  }
-};
-
-export const getNilaiStats = async (req, res) => {
-  try {
-    const bySemester = await nilai_Siswa.findAll({
-      attributes: [
-        'semester',
-        [nilai_Siswa.sequelize.fn('COUNT', nilai_Siswa.sequelize.col('id')), 'jumlah'],
-        [nilai_Siswa.sequelize.fn('AVG', nilai_Siswa.sequelize.col('rata_rata')), 'rata_rata']
-      ],
-      group: ['semester'],
-      order: [['semester', 'ASC']]
-    });
     res.json({
       success: true,
       data: {
-        by_semester: bySemester
-      }
+        tahun_ajaran: tahunAjaran.map(item => item.tahun_ajaran),
+        semester: semester.map(item => item.semester),
+      },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Gagal mengambil statistik nilai',
-      error: error.message
-    });
+    console.error('Get nilai filters error:', error);
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
   }
 };

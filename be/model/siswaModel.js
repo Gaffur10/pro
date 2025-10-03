@@ -1,6 +1,7 @@
 import { Sequelize } from "sequelize";
 import db from "../config/database.js";
 
+
 const { DataTypes } = Sequelize;
 const Siswa = db.define(
   "siswa",
@@ -23,22 +24,6 @@ const Siswa = db.define(
       type: DataTypes.STRING(20),
       allowNull: false,
     },
-    jenis_kelamin: {
-      type: DataTypes.ENUM('L', 'P'),
-      allowNull: false,
-    },
-    tanggal_lahir: {
-      type: DataTypes.DATEONLY,
-      allowNull: false,
-    },
-    alamat: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-    },
-    telepon: {
-      type: DataTypes.STRING(15),
-      allowNull: false,
-    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
@@ -55,5 +40,4 @@ const Siswa = db.define(
     updatedAt: 'updated_at'
   }
 );
-
 export default Siswa;

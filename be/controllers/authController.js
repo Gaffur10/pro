@@ -1,9 +1,10 @@
+import { validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../model/userModel.js';
 
 // Function to handle user login
-export const login = async (req, res) => {
+export const login = async (req, res, next) => {
   try {
     // Extract email and password from request body
     const { email, password } = req.body;
@@ -74,33 +75,32 @@ export const login = async (req, res) => {
   } catch (error) {
     // Log error and send server error response
     console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server' // Server error occurred
-    });
+    next(error);
   }
 };
 
 // Function to handle user registration
-export const register = async (req, res) => {
+export const register = async (req, res, next) => {
   try {
-    // Extract user details from request body
-    const { nama, email, password, role } = req.body;
-
-    // Check if required fields are provided
-    if (!nama || !email || !password) {
+    // Finds the validation errors in this request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Nama, email, dan password harus diisi' // Name, email, and password must be provided
+        message: 'Data input tidak valid',
+        errors: errors.array(),
       });
     }
+
+    // Extract user details from request body
+    const { nama, email, password, role } = req.body;
 
     // Check if email is already registered
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Email sudah terdaftar' // Email already registered
+        message: 'Email sudah terdaftar', // Email already registered
       });
     }
 
@@ -113,7 +113,7 @@ export const register = async (req, res) => {
       nama,
       email,
       password: hashedPassword,
-      role: role || 'teacher' // Default role is teacher if not provided
+      role: role || 'teacher', // Default role is teacher if not provided
     });
 
     // Send success response with created user data
@@ -125,21 +125,18 @@ export const register = async (req, res) => {
         nama: user.nama,
         email: user.email,
         role: user.role,
-        status: user.status
-      }
+        status: user.status,
+      },
     });
   } catch (error) {
     // Log error and send server error response
     console.error('Register error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server' // Server error occurred
-    });
+    next(error);
   }
 };
 
 // Function to get user profile data
-export const getProfile = async (req, res) => {
+export const getProfile = async (req, res, next) => {
   try {
     // Find user by primary key (id) excluding password field
     const user = await User.findByPk(req.user.id, {
@@ -154,15 +151,12 @@ export const getProfile = async (req, res) => {
   } catch (error) {
     // Log error and send server error response
     console.error('Get profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server' // Server error occurred
-    });
+    next(error);
   }
 };
 
 // Function to change user password
-export const changePassword = async (req, res) => {
+export const changePassword = async (req, res, next) => {
   try {
     // Extract current and new password from request body
     const { currentPassword, newPassword } = req.body;
@@ -202,9 +196,6 @@ export const changePassword = async (req, res) => {
   } catch (error) {
     // Log error and send server error response
     console.error('Change password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Terjadi kesalahan server' // Server error occurred
-    });
+    next(error);
   }
 };

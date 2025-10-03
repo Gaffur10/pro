@@ -5,7 +5,8 @@ import {
   createSiswa, 
   updateSiswa, 
   deleteSiswa, 
-  getSiswaStats 
+  getSiswaStats,
+  getAllKelas 
 } from '../controllers/siswaController.js';
 import { verifyToken, verifyTeacher } from '../middleware/auth.js';
 
@@ -16,6 +17,9 @@ router.use(verifyToken);
 
 // Get all siswa with pagination and search
 router.get('/', getAllSiswa);
+
+// Get all distinct classes
+router.get('/classes', getAllKelas);
 
 // Get siswa statistics
 router.get('/stats', getSiswaStats);
