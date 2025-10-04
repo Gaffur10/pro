@@ -369,3 +369,43 @@ export const getNilaiFilters = async (req, res) => {
     res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
   }
 };
+
+export const getNilaiBySiswa = async (req, res) => {
+  try {
+    const { siswa_id } = req.params;
+    const { semester, tahun_ajaran } = req.query;
+
+    if (!semester || !tahun_ajaran) {
+      return res.status(400).json({ message: 'Semester dan Tahun Ajaran diperlukan' });
+    }
+
+    const nilaiSiswa = await Nilai.findAll({
+      where: {
+        siswa_id,
+        semester,
+        tahun_ajaran,
+      },
+      include: [{
+        model: MataPelajaran,
+        as: 'mata_pelajaran',
+        attributes: ['nama_mapel'],
+      }],
+      order: [['mapel_id', 'ASC']],
+    });
+
+    if (!nilaiSiswa || nilaiSiswa.length === 0) {
+      return res.status(404).json({ message: 'Data nilai tidak ditemukan untuk siswa pada periode ini.' });
+    }
+
+    const formattedNilai = nilaiSiswa.map(n => ({
+      mapel: n.mata_pelajaran.nama_mapel,
+      nilai: parseFloat(n.nilai),
+    }));
+
+    res.json({ success: true, data: formattedNilai });
+
+  } catch (error) {
+    console.error('Get nilai by siswa error:', error);
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
+  }
+};

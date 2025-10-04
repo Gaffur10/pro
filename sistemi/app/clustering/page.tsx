@@ -1,7 +1,6 @@
 'use client'
 
 import type React from "react"
-
 import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { BarChart3, Play, Trash2, Download, TrendingUp, Filter } from "lucide-react"
 import apiService from "@/lib/api"
+import { StudentGradeDetailModal } from '@/components/student-grade-detail-modal'
 
 // Struktur data hasil clustering yang diterima dari backend
 interface ClusteringResult {
@@ -26,6 +26,8 @@ interface ClusteringResult {
   nama?: string
   kelas?: string
   nilai_rata_rata: number;
+  semester: string;
+  tahun_ajaran: string;
 }
 
 // Struktur data statistik clustering yang ditampilkan di dashboard
@@ -52,6 +54,9 @@ export default function ClusteringPage() {
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState("")
+
+  // State untuk detail siswa (modal)
+  const [detailSiswa, setDetailSiswa] = useState<ClusteringResult | null>(null)
 
   // State untuk menyimpan opsi filter yang tersedia
   const [filters, setFilters] = useState<NilaiFilters>({ tahun_ajaran: [], semester: [] });
@@ -97,7 +102,14 @@ export default function ClusteringPage() {
         apiService.getClusteringStats(statsParams),
       ]);
 
-      setResults(resultsResponse.data);
+      // Pastikan semester dan tahun_ajaran ada di setiap hasil
+      const resultsWithPeriod = resultsResponse.data.map((res: any) => ({
+        ...res,
+        semester: activeFilters.semester,
+        tahun_ajaran: activeFilters.tahun_ajaran,
+      }));
+
+      setResults(resultsWithPeriod);
       setStats(statsResponse.data);
     } catch (error: any) {
       setError(error.message || "Gagal memuat data clustering");
@@ -220,6 +232,8 @@ export default function ClusteringPage() {
 
   return (
     <div className="space-y-6">
+      <StudentGradeDetailModal siswa={detailSiswa} onClose={() => setDetailSiswa(null)} />
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Clustering Nilai</h1>
@@ -364,7 +378,7 @@ export default function ClusteringPage() {
                     </TableHeader>
                     <TableBody>
                       {results.map((result) => (
-                        <TableRow key={result.id}>
+                        <TableRow key={result.id} onClick={() => setDetailSiswa(result)} className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
                           <TableCell>{result.nis || "-"}</TableCell>
                           <TableCell>{result.nama || "-"}</TableCell>
                           <TableCell>{result.kelas || "-"}</TableCell>

@@ -141,6 +141,11 @@ class ApiService {
     return this.uploadRequest('/nilai/upload', formData);
   }
 
+  async getNilaiBySiswaId(siswaId, params) {
+    const queryString = new URLSearchParams(params).toString();
+    return this.request(`/nilai/siswa/${siswaId}?${queryString}`);
+  }
+
   // Clustering
   async runClustering(clusteringData) {
     return this.request('/clustering/run', { method: 'POST', body: JSON.stringify(clusteringData) });

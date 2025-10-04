@@ -7,7 +7,8 @@ import {
   getAllMapel,
   createMapel, // <-- Add this import
   getNilaiFilters,
-  uploadNilaiFromExcel
+  uploadNilaiFromExcel,
+  getNilaiBySiswa
 } from '../controllers/nilaiController.js';
 import { verifyToken, verifyTeacher } from '../middleware/auth.js';
 import upload from '../middleware/upload.js';
@@ -31,6 +32,9 @@ router.get('/filters', getNilaiFilters);
 
 // Get all grade data (paginated, searchable)
 router.get('/', getAllNilai);
+
+// Get a specific student's grade details for a period
+router.get('/siswa/:siswa_id', getNilaiBySiswa);
 
 // Create or Update a student's entire grade report for a semester
 router.post('/', verifyTeacher, createOrUpdateNilai);
