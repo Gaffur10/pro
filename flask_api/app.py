@@ -130,18 +130,22 @@ def clustering():
         cluster_labels, centroids = jalankan_kmeans(vectors, n_clusters)
 
         # Siapkan hasil dengan menyertakan jarak ke centroid
-        result = []
+        results = []
         for i, vector in enumerate(vectors):
             label = cluster_labels[i]
             centroid = centroids[label]
             distance = hitung_jarak_euclidean(vector, centroid)
-            result.append({
+            results.append({
                 'id': ids[i],
                 'cluster': int(label),
                 'distance': distance
             })
 
-        return jsonify(result)
+        # Kembalikan hasil, beserta posisi akhir centroid untuk pemeringkatan di backend
+        return jsonify({
+            'results': results,
+            'centroids': centroids
+        })
 
     except Exception as e:
         print(f"Terjadi error di /clustering: {e}")

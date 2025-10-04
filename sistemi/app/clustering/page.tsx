@@ -71,13 +71,16 @@ export default function ClusteringPage() {
   // State untuk filter hasil clustering di tabel
   const [clusterFilter, setClusterFilter] = useState(""); // "" = Semua Cluster
 
+  // State pemicu untuk memaksa re-fetch data
+  const [runCounter, setRunCounter] = useState(0);
+
   // State untuk parameter clustering
   const [clusteringParams, setClusteringParams] = useState({
     algoritma: "k-means",
     jumlah_cluster: "3",
   })
 
-  const fetchClusteringData = useCallback(async () => {
+  const fetchClusteringData = useCallback(async (cluster = "") => {
     if (!activeFilters.tahun_ajaran || !activeFilters.semester) {
       setResults([]);
       setStats(null);
@@ -85,9 +88,8 @@ export default function ClusteringPage() {
     }
 
     setLoading(true);
-    setError("");
     try {
-      const apiParams = { ...activeFilters, cluster: clusterFilter, all: 'true' };
+      const apiParams = { ...activeFilters, cluster, all: 'true' };
       const statsParams = { ...activeFilters };
 
       const [resultsResponse, statsResponse] = await Promise.all([
@@ -102,33 +104,37 @@ export default function ClusteringPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeFilters, clusterFilter]);
+  }, [activeFilters]); // Dependensi diubah ke activeFilters
 
-  // Mengambil data filter dan data clustering awal saat komponen dimuat
+  // Mengambil data filter (tahun ajaran & semester) saat komponen dimuat
   useEffect(() => {
-    const fetchInitialData = async () => {
+    const fetchFilterOptions = async () => {
       try {
         const filtersResponse = await apiService.getNilaiFilters();
         setFilters(filtersResponse.data);
         
         const initialTahunAjaran = filtersResponse.data.tahun_ajaran[0] || "";
         const initialSemester = filtersResponse.data.semester[0] || "";
-        const initialFilters = { tahun_ajaran: initialTahunAjaran, semester: initialSemester };
 
-        setSelectedFilters(initialFilters);
-        setActiveFilters(initialFilters);
+        // Set filter untuk input form
+        setSelectedFilters({ tahun_ajaran: initialTahunAjaran, semester: initialSemester });
+        // Set filter untuk data yang ditampilkan pertama kali
+        setActiveFilters({ tahun_ajaran: initialTahunAjaran, semester: initialSemester });
 
       } catch (error: any) {
-        setError(error.message || "Gagal memuat data awal");
+        setError(error.message || "Gagal memuat opsi filter");
       }
     };
-    fetchInitialData();
+    fetchFilterOptions();
   }, []);
 
-  // Fetch data clustering setiap kali filter AKTIF atau filter NAMA CLUSTER berubah
+  // Fetch data clustering setiap kali filter AKTIF, NAMA CLUSTER, atau pemicu RUNCOUNTER berubah
   useEffect(() => {
-    fetchClusteringData();
-  }, [fetchClusteringData]);
+    // Jangan jalankan fetch jika ini adalah render pertama dan filter belum siap
+    if (activeFilters.tahun_ajaran && activeFilters.semester) {
+      fetchClusteringData(clusterFilter);
+    }
+  }, [clusterFilter, activeFilters, runCounter, fetchClusteringData]);
 
 
   // Fungsi: jalankan proses clustering baru
@@ -138,50 +144,28 @@ export default function ClusteringPage() {
       return;
     }
     try {
-      setRunning(true);
-      setError("");
+      setRunning(true)
+      setError("")
       await apiService.runClustering({
         ...clusteringParams,
         ...selectedFilters,
         jumlah_cluster: parseInt(clusteringParams.jumlah_cluster),
-      });
-
-      // Cek apakah filter yang dijalankan sama dengan yang sedang aktif.
-      const filtersChanged = activeFilters.tahun_ajaran !== selectedFilters.tahun_ajaran || 
-                             activeFilters.semester !== selectedFilters.semester;
-
-      // Selalu update activeFilters agar konsisten
+      })
+      
+      // Set filter aktif agar UI konsisten
       setActiveFilters(selectedFilters);
-      setClusterFilter("");
+      // Reset filter tabel
+      setClusterFilter(""); 
+      // Tingkatkan pemicu untuk memaksa re-fetch
+      setRunCounter(c => c + 1);
 
-      // Jika filter tidak berubah, useEffect tidak akan jalan, jadi panggil fetch manual.
-      if (!filtersChanged) {
-        // Buat fungsi fetch ad-hoc untuk memastikan data terbaru diambil
-        const fetchNewData = async () => {
-            setLoading(true);
-            try {
-                const apiParams = { ...selectedFilters, cluster: "", all: 'true' };
-                const statsParams = { ...selectedFilters };
-                const [resultsResponse, statsResponse] = await Promise.all([
-                    apiService.getClusteringResults(apiParams),
-                    apiService.getClusteringStats(statsParams),
-                ]);
-                setResults(resultsResponse.data);
-                setStats(statsResponse.data);
-            } catch (error: any) {
-                setError(error.message || "Gagal memuat data clustering");
-            } finally {
-                setLoading(false);
-            }
-        };
-        await fetchNewData();
-      }
     } catch (error: any) {
-      setError(error.message || "Gagal menjalankan clustering");
+      setError(error.message || "Gagal menjalankan clustering")
     } finally {
-      setRunning(false);
+      setRunning(false)
     }
-  };
+  }
+
   const handleClearResults = async () => {
     const { tahun_ajaran, semester } = selectedFilters;
     if (!tahun_ajaran || !semester) {

@@ -76,73 +76,44 @@ export const runClustering = async (req, res) => {
     };
 
     const flaskResponse = await axios.post('http://localhost:5001/clustering', flaskRequestData);
-    const flaskResults = flaskResponse.data; // Hasilnya: [{id, cluster, distance}, ...]
+    const { results: flaskResults, centroids: flaskCentroids } = flaskResponse.data;
 
     // Buat Map untuk mencari hasil cluster & jarak per siswa dengan cepat.
     const flaskResultMap = new Map(flaskResults.map(item => [item.id, { cluster: item.cluster, distance: item.distance }]));
 
-    // --- 5. PEMBARUAN: Pemberian Label Cluster Berdasarkan Ambang Batas (Threshold) ---
-    // Logika ini diubah dari sistem peringkat ke sistem ambang batas untuk memastikan
-    // label cluster (Tinggi, Sedang, Rendah) lebih akurat dan tidak bergantung pada
-    // perbandingan antar cluster, sehingga menyelesaikan bug salah pelabelan.
+    // --- 5. PEMBERIAN LABEL CLUSTER BERDASARKAN PERINGKAT (RANKING) ---
+    // Logika ini menggantikan sistem ambang batas (threshold) yang lama.
+    // Pelabelan sekarang didasarkan pada urutan centroid, yang lebih akurat
+    // karena konsisten dengan bagaimana cluster dibentuk pada data yang dinormalisasi.
 
-    /**
-     * Fungsi helper untuk mendapatkan label cluster berdasarkan nilai rata-rata.
-     * @param {number} average - Nilai rata-rata sebuah cluster.
-     * @param {number} jumlah_cluster - Jumlah cluster yang dipilih pengguna.
-     * @returns {string} Label cluster (e.g., "Tinggi", "Sedang").
-     */
-    const getLabelForCluster = (average, jumlah_cluster) => {
-      switch (jumlah_cluster) {
-        case 5:
-          if (average > 90) return "Sangat Tinggi";
-          if (average > 80) return "Tinggi";
-          if (average > 70) return "Sedang";
-          if (average > 60) return "Rendah";
-          return "Sangat Rendah";
-        case 4:
-          if (average > 85) return "Sangat Tinggi";
-          if (average > 75) return "Tinggi";
-          if (average > 65) return "Sedang";
-          return "Rendah";
-        case 3:
-          if (average > 80) return "Tinggi";
-          if (average > 65) return "Sedang";
-          return "Rendah";
-        case 2:
-          if (average > 75) return "Tinggi";
-          return "Rendah";
-        default:
-          return "Cluster"; // Fallback jika jumlah cluster tidak terdefinisi
+    const getLabelsByRank = (count) => {
+      switch (count) {
+        case 5: return ["Sangat Tinggi", "Tinggi", "Sedang", "Rendah", "Sangat Rendah"];
+        case 4: return ["Sangat Tinggi", "Tinggi", "Sedang", "Rendah"];
+        case 3: return ["Tinggi", "Sedang", "Rendah"];
+        case 2: return ["Tinggi", "Rendah"];
+        default: return Array.from({ length: count }, (_, i) => `Cluster ${i + 1}`);
       }
     };
 
-    // Hitung rata-rata skor untuk setiap cluster yang dihasilkan oleh K-Means
-    const clustersTemp = {};
-    dataForKMeans.forEach(siswa => {
-        const resultData = flaskResultMap.get(siswa.siswa_id);
-        if (!resultData) return;
+    // Hitung rata-rata untuk setiap centroid untuk menentukan peringkatnya.
+    // Centroid dengan rata-rata tertinggi adalah cluster "terbaik".
+    const rankedCentroids = flaskCentroids
+      .map((centroid, index) => ({
+        originalIndex: index,
+        // Hitung rata-rata dari vektor centroid
+        average: centroid.reduce((sum, val) => sum + val, 0) / centroid.length,
+      }))
+      .sort((a, b) => b.average - a.average); // Urutkan dari tertinggi ke terendah
 
-        const { cluster: clusterIndex } = resultData;
+    // Dapatkan daftar label berdasarkan jumlah cluster
+    const labels = getLabelsByRank(jumlah_cluster);
 
-        if (!clustersTemp[clusterIndex]) {
-            clustersTemp[clusterIndex] = [];
-        }
-        const avgScore = siswa.vector.reduce((a, b) => a + b, 0) / siswa.vector.length;
-        clustersTemp[clusterIndex].push(avgScore);
-    });
-
-    const clusterAverages = Object.keys(clustersTemp).map(clusterIndex => {
-        const scores = clustersTemp[clusterIndex];
-        const average = scores.reduce((a, b) => a + b, 0) / scores.length;
-        return { originalIndex: parseInt(clusterIndex), value: average };
-    });
-
-    // Buat pemetaan dari indeks cluster asli ke label yang sesuai menggunakan logika ambang batas
+    // Buat pemetaan dari indeks cluster asli ke label peringkatnya.
     const clusterLabelMap = {};
-    clusterAverages.forEach(cluster => {
-      const { originalIndex, value } = cluster;
-      clusterLabelMap[originalIndex] = getLabelForCluster(value, jumlah_cluster);
+    rankedCentroids.forEach((centroid, rank) => {
+      // Jika ada 3 cluster, rank 0 akan mendapat label "Tinggi", rank 1 "Sedang", dst.
+      clusterLabelMap[centroid.originalIndex] = labels[rank];
     });
 
     // --- 6. Simpan Hasil ke Database ---
@@ -162,7 +133,7 @@ export const runClustering = async (req, res) => {
       siswa_id: c.siswa_id,
       // `cluster` menyimpan nomor cluster asli dari K-Means
       cluster: c.cluster,
-      // `keterangan` diisi dengan label dari logika ambang batas yang baru
+      // `keterangan` diisi dengan label dari logika peringkat yang baru
       keterangan: clusterLabelMap[c.cluster],
       jarak_centroid: c.distance, // Gunakan jarak yang sudah didapat
       algoritma,
