@@ -2,49 +2,47 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { LayoutDashboard, Users, GraduationCap, FileText, BarChart3, LogOut, TrendingUp } from "lucide-react"
 
-const navigation = [
-  {
-    name: "Dashboard",
-    href: "/",
-    icon: LayoutDashboard,
-  },
-  {
-    name: "Data Pengguna",
-    href: "/users",
-    icon: Users,
-  },
-  {
-    name: "Data Siswa",
-    href: "/students",
-    icon: GraduationCap,
-  },
-  {
-    name: "Data Nilai",
-    href: "/grades",
-    icon: FileText,
-  },
-  {
-    name: "Analisis Elbow",
-    href: "/elbow-analysis",
-    icon: TrendingUp,
-  },
-  {
-    name: "Hasil Clustering",
-    href: "/clustering",
-    icon: BarChart3,
-  },
+const allNavigation = [
+  { name: "Dashboard", href: "/", icon: LayoutDashboard, roles: ["admin"] },
+  { name: "Data Pengguna", href: "/users", icon: Users, roles: ["admin"] },
+  { name: "Data Siswa", href: "/students", icon: GraduationCap, roles: ["admin"] },
+  { name: "Data Nilai", href: "/grades", icon: FileText, roles: ["admin", "teacher"] },
+
+  { name: "Hasil Clustering", href: "/clustering", icon: BarChart3, roles: ["admin", "teacher"] },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
+  const [visibleNavigation, setVisibleNavigation] = useState<typeof allNavigation>([])
+
+  useEffect(() => {
+    const userString = localStorage.getItem("user")
+    if (userString) {
+      try {
+        const user = JSON.parse(userString)
+        const userRole = user?.role || "teacher" 
+        const filteredNav = allNavigation.filter((item) => item.roles.includes(userRole))
+        setVisibleNavigation(filteredNav)
+      } catch (error) {
+        console.error("Failed to parse user data from localStorage", error)
+        // Fallback for safety, maybe show teacher nav or nothing
+        setVisibleNavigation(allNavigation.filter((item) => item.roles.includes("teacher")))
+      }
+    } else {
+      // Handle case where user is not in localStorage, redirect or show minimal nav
+       setVisibleNavigation(allNavigation.filter((item) => item.roles.includes("teacher")))
+    }
+  }, [])
 
   const handleLogout = () => {
     localStorage.removeItem("isLoggedIn")
-    localStorage.removeItem("userRole")
+    localStorage.removeItem("user")
+    localStorage.removeItem("token")
     window.location.href = "/login"
   }
 
@@ -55,7 +53,7 @@ export function Sidebar() {
         <span className="ml-2 text-lg font-semibold">SIS Clustering</span>
       </div>
       <nav className="flex-1 space-y-1 px-4 py-4">
-        {navigation.map((item) => {
+        {visibleNavigation.map((item) => {
           const isActive = pathname === item.href
           return (
             <Link

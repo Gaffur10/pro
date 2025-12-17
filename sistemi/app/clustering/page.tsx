@@ -8,9 +8,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { BarChart3, Play, Trash2, Download, TrendingUp, Filter } from "lucide-react"
+import { BarChart3, Play, Trash2, Download, Filter } from "lucide-react"
 import apiService from "@/lib/api"
 import { StudentGradeDetailModal } from '@/components/student-grade-detail-modal'
+
 
 // Struktur data hasil clustering yang diterima dari backend
 interface ClusteringResult {
@@ -33,18 +34,22 @@ interface ClusteringResult {
 // Struktur data statistik clustering yang ditampilkan di dashboard
 interface ClusteringStats {
   total_results: number
-  cluster_distribution: {
-    [key: string]: { count: number; percentage: string }
-  }
+  cluster_distribution: Array<{
+    cluster_id: number;
+    label: string;
+    count: number;
+    percentage: string;
+  }>
   average_distance: number
   algorithm_used: string
   clusters_count: number
 }
 
-// Struktur filter nilai berdasarkan tahun ajaran dan semester
+// Struktur filter nilai berdasarkan tahun ajaran, semester, dan kelas
 interface NilaiFilters {
   tahun_ajaran: string[];
   semester: string[];
+  kelas: string[];
 }
 
 export default function ClusteringPage() {
@@ -58,19 +63,25 @@ export default function ClusteringPage() {
   // State untuk detail siswa (modal)
   const [detailSiswa, setDetailSiswa] = useState<ClusteringResult | null>(null)
 
+
+
+  
+
   // State untuk menyimpan opsi filter yang tersedia
-  const [filters, setFilters] = useState<NilaiFilters>({ tahun_ajaran: [], semester: [] });
+  const [filters, setFilters] = useState<NilaiFilters>({ tahun_ajaran: [], semester: [], kelas: [] });
 
   // State untuk filter sumber data (input form)
   const [selectedFilters, setSelectedFilters] = useState({
     tahun_ajaran: "",
     semester: "",
+    kelas: "",
   });
 
   // State untuk filter yang aktif digunakan untuk menampilkan data di tabel
   const [activeFilters, setActiveFilters] = useState({
     tahun_ajaran: "",
     semester: "",
+    kelas: "",
   });
 
   // State untuk filter hasil clustering di tabel
@@ -79,59 +90,76 @@ export default function ClusteringPage() {
   // State pemicu untuk memaksa re-fetch data
   const [runCounter, setRunCounter] = useState(0);
 
-  // State untuk parameter clustering
-  const [clusteringParams, setClusteringParams] = useState({
-    algoritma: "k-means",
-    jumlah_cluster: "3",
-  })
+  // Fetch data clustering setiap kali filter AKTIF, NAMA CLUSTER, atau pemicu RUNCOUNTER berubah
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
 
-  const fetchClusteringData = useCallback(async (cluster = "") => {
-    if (!activeFilters.tahun_ajaran || !activeFilters.semester) {
-      setResults([]);
-      setStats(null);
-      return;
+    const fetchClusteringData = async () => {
+      if (!activeFilters.tahun_ajaran || !activeFilters.semester || !activeFilters.kelas) {
+        setResults([]);
+        setStats(null);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const apiParams = { ...activeFilters, cluster: clusterFilter, all: 'true' };
+        const statsParams = { ...activeFilters };
+
+        const [resultsResponse, statsResponse] = await Promise.all([
+          apiService.getClusteringResults(apiParams, signal),
+          apiService.getClusteringStats(statsParams, signal),
+        ]);
+
+        const resultsWithPeriod = resultsResponse.data.map((res: any) => ({
+          ...res,
+          semester: activeFilters.semester,
+          tahun_ajaran: activeFilters.tahun_ajaran,
+          kelas: activeFilters.kelas,
+        }));
+
+        setResults(resultsWithPeriod);
+        setStats(statsResponse.data);
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          setError(error.message || "Gagal memuat data clustering");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    if (activeFilters.tahun_ajaran && activeFilters.semester && activeFilters.kelas) {
+      fetchClusteringData();
     }
 
-    setLoading(true);
-    try {
-      const apiParams = { ...activeFilters, cluster, all: 'true' };
-      const statsParams = { ...activeFilters };
+    return () => {
+      controller.abort();
+    };
+  }, [clusterFilter, activeFilters, runCounter]);
 
-      const [resultsResponse, statsResponse] = await Promise.all([
-        apiService.getClusteringResults(apiParams),
-        apiService.getClusteringStats(statsParams),
-      ]);
-
-      // Pastikan semester dan tahun_ajaran ada di setiap hasil
-      const resultsWithPeriod = resultsResponse.data.map((res: any) => ({
-        ...res,
-        semester: activeFilters.semester,
-        tahun_ajaran: activeFilters.tahun_ajaran,
-      }));
-
-      setResults(resultsWithPeriod);
-      setStats(statsResponse.data);
-    } catch (error: any) {
-      setError(error.message || "Gagal memuat data clustering");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeFilters]); // Dependensi diubah ke activeFilters
-
-  // Mengambil data filter (tahun ajaran & semester) saat komponen dimuat
+  // Mengambil data filter (tahun ajaran, semester, kelas) saat komponen dimuat
   useEffect(() => {
     const fetchFilterOptions = async () => {
       try {
-        const filtersResponse = await apiService.getNilaiFilters();
-        setFilters(filtersResponse.data);
+        const [filtersResponse, kelasResponse] = await Promise.all([
+          apiService.getNilaiFilters(),
+          apiService.getKelasList()
+        ]);
         
-        const initialTahunAjaran = filtersResponse.data.tahun_ajaran[0] || "";
-        const initialSemester = filtersResponse.data.semester[0] || "";
+        const fetchedFilters = filtersResponse.data;
+        const fetchedKelas = kelasResponse.data;
 
-        // Set filter untuk input form
-        setSelectedFilters({ tahun_ajaran: initialTahunAjaran, semester: initialSemester });
-        // Set filter untuk data yang ditampilkan pertama kali
-        setActiveFilters({ tahun_ajaran: initialTahunAjaran, semester: initialSemester });
+        setFilters({ ...fetchedFilters, kelas: fetchedKelas });
+        
+        const initialTahunAjaran = fetchedFilters.tahun_ajaran[0] || "";
+        const initialSemester = fetchedFilters.semester[0] || "";
+        const initialKelas = fetchedKelas[0] || "";
+
+        const initialSelected = { tahun_ajaran: initialTahunAjaran, semester: initialSemester, kelas: initialKelas };
+        setSelectedFilters(initialSelected);
+        setActiveFilters(initialSelected);
 
       } catch (error: any) {
         setError(error.message || "Gagal memuat opsi filter");
@@ -140,36 +168,22 @@ export default function ClusteringPage() {
     fetchFilterOptions();
   }, []);
 
-  // Fetch data clustering setiap kali filter AKTIF, NAMA CLUSTER, atau pemicu RUNCOUNTER berubah
-  useEffect(() => {
-    // Jangan jalankan fetch jika ini adalah render pertama dan filter belum siap
-    if (activeFilters.tahun_ajaran && activeFilters.semester) {
-      fetchClusteringData(clusterFilter);
-    }
-  }, [clusterFilter, activeFilters, runCounter, fetchClusteringData]);
-
 
   // Fungsi: jalankan proses clustering baru
   const handleRunClustering = async () => {
-    if (!selectedFilters.tahun_ajaran || !selectedFilters.semester) {
-      setError("Silakan pilih Tahun Ajaran dan Semester terlebih dahulu.");
+    if (!selectedFilters.tahun_ajaran || !selectedFilters.semester || !selectedFilters.kelas) {
+      setError("Silakan pilih Tahun Ajaran, Semester, dan Kelas terlebih dahulu.");
       return;
     }
     try {
       setRunning(true)
       setError("")
-      await apiService.runClustering({
-        ...clusteringParams,
+      await apiService.runClustering({  // mengatur jumlah cluster
         ...selectedFilters,
-        jumlah_cluster: parseInt(clusteringParams.jumlah_cluster),
+        algoritma: "k-means", // Hardcoded as requested
       })
       
-      // Set filter aktif agar UI konsisten
-      setActiveFilters(selectedFilters);
-      // Reset filter tabel
-      setClusterFilter(""); 
-      // Tingkatkan pemicu untuk memaksa re-fetch
-      setRunCounter(c => c + 1);
+      setActiveFilters(selectedFilters); setClusterFilter(""); setRunCounter(c => c + 1);
 
     } catch (error: any) {
       setError(error.message || "Gagal menjalankan clustering")
@@ -179,17 +193,16 @@ export default function ClusteringPage() {
   }
 
   const handleClearResults = async () => {
-    const { tahun_ajaran, semester } = selectedFilters;
-    if (!tahun_ajaran || !semester) {
-      setError("Pilih tahun ajaran dan semester untuk menghapus hasil.");
+    const { tahun_ajaran, semester, kelas } = selectedFilters;
+    if (!tahun_ajaran || !semester || !kelas) {
+      setError("Pilih tahun ajaran, semester, dan kelas untuk menghapus hasil.");
       return;
     }
 
-    if (confirm(`Apakah Anda yakin ingin menghapus hasil clustering untuk ${semester} ${tahun_ajaran}?`)) {
+    if (confirm(`Apakah Anda yakin ingin menghapus hasil clustering untuk kelas ${kelas}, ${semester} ${tahun_ajaran}?`)) {
       try {
         await apiService.clearClusteringResults(selectedFilters);
-        // Re-fetch data to show the cleared state
-        await fetchClusteringData();
+        setRunCounter(c => c + 1);
       } catch (error: any) {
         setError(error.message || "Gagal menghapus hasil clustering");
       }
@@ -226,7 +239,7 @@ export default function ClusteringPage() {
   }
 
   // Tampilan loading awal
-  if (loading && !results.length) {
+  if (loading && !results.length && !error) {
     return <div>Memuat data halaman...</div>
   }
 
@@ -234,10 +247,10 @@ export default function ClusteringPage() {
     <div className="space-y-6">
       <StudentGradeDetailModal siswa={detailSiswa} onClose={() => setDetailSiswa(null)} />
 
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Clustering Nilai</h1>
-          <p className="text-muted-foreground">Analisis pengelompokan nilai siswa.</p>
+          <p className="text-muted-foreground">Analisis pengelompokan nilai siswa berdasarkan performa akademik.</p>
         </div>
         <div className="flex space-x-2">
           {results.length > 0 && (
@@ -251,95 +264,147 @@ export default function ClusteringPage() {
 
       {error && <div className="bg-red-100 text-red-700 p-3 rounded">{error}</div>}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1 flex flex-col gap-6">
-          {/* Kartu filter data sumber */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center"><Filter className="mr-2 h-5 w-5"/>Filter Data Sumber</CardTitle>
-              <CardDescription>Pilih periode data nilai yang akan digunakan untuk clustering.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="tahun_ajaran">Tahun Ajaran</Label>
-                <Select
-                  value={selectedFilters.tahun_ajaran}
-                  onValueChange={(value) => setSelectedFilters({ ...selectedFilters, tahun_ajaran: value })}
-                >
-                  <SelectTrigger><SelectValue placeholder="Pilih tahun ajaran" /></SelectTrigger>
-                  <SelectContent>
-                    {filters.tahun_ajaran.map(ta => <SelectItem key={ta} value={ta}>{ta}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="semester">Semester</Label>
-                <Select
-                  value={selectedFilters.semester}
-                  onValueChange={(value) => setSelectedFilters({ ...selectedFilters, semester: value })}
-                >
-                  <SelectTrigger><SelectValue placeholder="Pilih semester" /></SelectTrigger>
-                  <SelectContent>
-                    {filters.semester.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Kartu pengaturan clustering */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Pengaturan Clustering</CardTitle>
-              <CardDescription>Konfigurasi algoritma dan jumlah cluster.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="algoritma">Algoritma</Label>
-                <Select value={clusteringParams.algoritma} onValueChange={(v) => setClusteringParams(p => ({...p, algoritma: v}))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="k-means">K-Means</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="jumlah_cluster">Jumlah Cluster</Label>
-                <Select value={clusteringParams.jumlah_cluster} onValueChange={(v) => setClusteringParams(p => ({...p, jumlah_cluster: v}))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="2">2 Cluster</SelectItem>
-                    <SelectItem value="3">3 Cluster</SelectItem>
-                    <SelectItem value="4">4 Cluster</SelectItem>
-                    <SelectItem value="5">5 Cluster</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={handleRunClustering} disabled={running} className="w-full">
-                {running ? 'Memproses...' : <><Play className="mr-2 h-4 w-4" />Jalankan Clustering</>}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* Kartu statistik clustering */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">Total Siswa</CardTitle><BarChart3 className="h-4 w-4 text-muted-foreground" /></CardHeader>
-              <CardContent><div className="text-2xl font-bold">{stats?.total_results || 0}</div><p className="text-xs text-muted-foreground">Data tercluster dari periode terpilih</p></CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">Rata-rata Jarak</CardTitle><TrendingUp className="h-4 w-4 text-muted-foreground" /></CardHeader>
-              <CardContent><div className="text-2xl font-bold">{stats?.average_distance?.toFixed(4) || "0.00"}</div><p className="text-xs text-muted-foreground">Jarak rata-rata ke centroid</p></CardContent>
-            </Card>
+      {/* --- Panel Kontrol Clustering --- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center"><Filter className="mr-2 h-5 w-5"/>Panel Kontrol Clustering</CardTitle>
+          <CardDescription>Pilih sumber data dan jalankan proses clustering.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div className="grid gap-2">
+              <Label htmlFor="tahun_ajaran">Tahun Ajaran</Label>
+              <Select
+                value={selectedFilters.tahun_ajaran}
+                onValueChange={(value) => setSelectedFilters({ ...selectedFilters, tahun_ajaran: value })}
+              >
+                <SelectTrigger><SelectValue placeholder="Pilih tahun ajaran" /></SelectTrigger>
+                <SelectContent>
+                  {filters.tahun_ajaran.map(ta => <SelectItem key={ta} value={ta}>{ta}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="semester">Semester</Label>
+              <Select
+                value={selectedFilters.semester}
+                onValueChange={(value) => setSelectedFilters({ ...selectedFilters, semester: value })}
+              >
+                <SelectTrigger><SelectValue placeholder="Pilih semester" /></SelectTrigger>
+                <SelectContent>
+                  {filters.semester.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="kelas">Kelas</Label>
+              <Select
+                value={selectedFilters.kelas}
+                onValueChange={(value) => setSelectedFilters({ ...selectedFilters, kelas: value })}
+              >
+                <SelectTrigger><SelectValue placeholder="Pilih kelas" /></SelectTrigger>
+                <SelectContent>
+                  {filters.kelas.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleRunClustering} disabled={running} className="w-full md:w-auto">
+              {running ? 'Memproses...' : <><Play className="mr-2 h-4 w-4" />Jalankan Clustering</>}
+            </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* --- Hasil dan Statistik --- */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-3 flex flex-col gap-6">
+          {/* Panel Informasi Ringkas */}
+          {stats && stats.total_results > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Informasi Ringkas</CardTitle>
+                <CardDescription>Ringkasan dari hasil clustering periode yang dipilih.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Total Siswa</p>
+                    <p className="text-2xl font-bold">{stats.total_results}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Jumlah Cluster</p>
+                    <p className="text-2xl font-bold">{stats.clusters_count}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Rata-rata Jarak</p>
+                    <p className="text-2xl font-bold">{stats.average_distance.toFixed(4)}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Distribusi Siswa per Cluster */}
+          {stats && stats.total_results > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Distribusi Siswa per Cluster</CardTitle>
+                <CardDescription>Jumlah dan persentase siswa dalam setiap cluster yang dihasilkan.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cluster</TableHead>
+                      <TableHead >Jumlah Siswa</TableHead>
+                      <TableHead>Keterangan</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(stats?.cluster_distribution && Array.isArray(stats.cluster_distribution)
+                      ? stats.cluster_distribution
+                      : Object.entries(stats?.cluster_distribution || {}).map(([label, data]) => ({
+                          cluster_id: (data as any).cluster_id, // Assuming cluster_id is available in the object
+                          label,
+                          count: (data as any).count,
+                          percentage: (data as any).percentage,
+                        }))
+                    )
+                      ?.sort((a, b) => {
+                        const rank: { [key: string]: number } = {
+                          'sangat tinggi': 1,
+                          'tinggi': 2,
+                          'sedang': 3,
+                          'rendah': 4,
+                          'sangat rendah': 5,
+                        };
+                        const rankA = rank[a.label.toLowerCase()] || 99;
+                        const rankB = rank[b.label.toLowerCase()] || 99;
+                        return rankA - rankB;
+                      })
+                      .map((entry) => (
+                        <TableRow key={`${entry.cluster_id}-${entry.label}`}>                          
+                          <TableCell>{entry.cluster_id}</TableCell>
+                          <TableCell>{entry.count}</TableCell>
+                          <TableCell>{entry.label}</TableCell>
+                        </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          
 
           {/* Tabel hasil clustering */}
           <Card>
             <CardHeader>
               <CardTitle>Hasil Clustering</CardTitle>
-              <CardDescription>Detail hasil pengelompokan siswa.</CardDescription>
+              <CardDescription>
+                Detail hasil pengelompokan siswa untuk
+                <span className="font-semibold text-primary"> {activeFilters.kelas}, {activeFilters.semester} {activeFilters.tahun_ajaran}</span>.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {loading ? (
@@ -357,9 +422,17 @@ export default function ClusteringPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Semua Cluster ({stats?.total_results || 0} siswa)</SelectItem>
-                        {stats && stats.cluster_distribution && Object.entries(stats.cluster_distribution).map(([name, data]) => (
-                          <SelectItem key={name} value={name} className="capitalize">
-                            {name} ({data.count} siswa)
+                        {(stats?.cluster_distribution && Array.isArray(stats.cluster_distribution)
+                          ? stats.cluster_distribution
+                          : Object.entries(stats?.cluster_distribution || {}).map(([label, data]) => ({
+                              cluster_id: (data as any).cluster_id,
+                              label,
+                              count: (data as any).count,
+                              percentage: (data as any).percentage,
+                            }))
+                        ).map((entry) => (
+                          <SelectItem key={`${entry.cluster_id}-${entry.label}`} value={entry.label} className="capitalize">
+                            {entry.label} ({entry.count} siswa)
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -371,22 +444,30 @@ export default function ClusteringPage() {
                         <TableHead>NIS</TableHead>
                         <TableHead>Nama</TableHead>
                         <TableHead>Kelas</TableHead>
-                        <TableHead>Cluster</TableHead>
+                        <TableHead>ID Cluster</TableHead>
+                        <TableHead>Keterangan</TableHead>
                         <TableHead>Jarak</TableHead>
                         <TableHead>Nilai Rata-rata</TableHead>
+                        <TableHead>Aksi</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {results.map((result) => (
-                        <TableRow key={result.id} onClick={() => setDetailSiswa(result)} className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <TableRow key={result.id}>
                           <TableCell>{result.nis || "-"}</TableCell>
                           <TableCell>{result.nama || "-"}</TableCell>
                           <TableCell>{result.kelas || "-"}</TableCell>
+                          <TableCell>{`C${result.cluster}`}</TableCell>
                           <TableCell>
-                            <Badge className={getBadgeClass(result.keterangan) as any}>{result.keterangan}</Badge>
+                            <Badge className={getBadgeClass(result.keterangan)}>{result.keterangan}</Badge>
                           </TableCell>
                           <TableCell>{Number(result.jarak_centroid).toFixed(4)}</TableCell>
                           <TableCell>{result.nilai_rata_rata}</TableCell>
+                          <TableCell>
+                            <Button variant="outline" size="sm" onClick={() => setDetailSiswa(result)}>
+                              Lihat Selengkapnya
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -396,7 +477,9 @@ export default function ClusteringPage() {
                 <div className="text-center py-12">
                   <BarChart3 className="mx-auto h-12 w-12 text-gray-400" />
                   <h3 className="mt-2 text-sm font-medium text-gray-900">Tidak Ada Hasil Clustering</h3>
-                  <p className="mt-1 text-sm text-gray-500">Jalankan proses clustering untuk melihat hasilnya di sini.</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Pilih sumber data dan jalankan proses clustering untuk melihat hasilnya di sini.
+                  </p>
                 </div>
               )}
             </CardContent>

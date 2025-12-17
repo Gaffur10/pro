@@ -10,13 +10,16 @@ class ApiService {
     const url = `${this.baseURL}${endpoint}`;
     const token = localStorage.getItem('token');
     
+    const { signal, ...restOptions } = options;
+
     const config = {
       headers: {
         'Content-Type': 'application/json',
         ...(token && { Authorization: `Bearer ${token}` }),
-        ...options.headers,
+        ...restOptions.headers,
       },
-      ...options,
+      ...restOptions,
+      signal,
     };
 
     try {
@@ -141,6 +144,10 @@ class ApiService {
     return this.uploadRequest('/nilai/upload', formData);
   }
 
+  async getNilaiUploadHistory() {
+    return this.request('/nilai/history');
+  }
+
   async getNilaiBySiswaId(siswaId, params) {
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/nilai/siswa/${siswaId}?${queryString}`);
@@ -150,14 +157,15 @@ class ApiService {
   async runClustering(clusteringData) {
     return this.request('/clustering/run', { method: 'POST', body: JSON.stringify(clusteringData) });
   }
-  async getClusteringResults(params = {}) {
+  async getClusteringResults(params = {}, signal) {
     const queryString = new URLSearchParams(params).toString();
-    return this.request(`/clustering/results?${queryString}`);
+    return this.request(`/clustering/results?${queryString}`, { signal });
   }
-  async getClusteringStats(params = {}) { 
+  async getClusteringStats(params = {}, signal) { 
     const queryString = new URLSearchParams(params).toString();
-    return this.request(`/clustering/stats?${queryString}`); 
+    return this.request(`/clustering/stats?${queryString}`, { signal }); 
 }
+  
   async clearClusteringResults(params = {}) { 
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/clustering/clear?${queryString}`, { method: 'DELETE' }); 
@@ -165,6 +173,53 @@ class ApiService {
   async getElbowAnalysis(params = {}) {
     const queryString = new URLSearchParams(params).toString();
     return this.request(`/clustering/elbow?${queryString}`);
+  }
+
+  async downloadClusteringReport(params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    return this.downloadRequest(`/clustering/download?${queryString}`);
+  }
+
+  // --- Helper for File Downloads ---
+  async downloadRequest(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    const token = localStorage.getItem('token');
+    
+    const config = {
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+        ...options.headers,
+      },
+      ...options,
+    };
+
+    try {
+      const response = await fetch(url, config);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          this.logout();
+          throw new Error('Sesi Anda telah berakhir. Silakan login kembali.');
+        }
+        const message = errorData.message || `Error ${response.status}: ${response.statusText}`;
+        const error = new Error(message);
+        throw error;
+      }
+      
+      // Return blob data and headers for file handling
+      return {
+        data: await response.blob(),
+        headers: response.headers,
+      };
+
+    } catch (error) {
+      console.error('API Download Error:', error);
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
+      }
+      throw error;
+    }
   }
 
   // User Management

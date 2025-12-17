@@ -8,7 +8,7 @@ import axios from 'axios';
 export const runClustering = async (req, res) => {
   try {
     // --- 1. Validasi Input ---
-    let { algoritma = 'kmeans', jumlah_cluster = 5, semester = '', tahun_ajaran = '' } = req.body;
+    let { algoritma = 'kmeans', jumlah_cluster = 3, semester = '', tahun_ajaran = '' } = req.body;
     jumlah_cluster = parseInt(jumlah_cluster);
 
     if (isNaN(jumlah_cluster) || jumlah_cluster <= 0) {
@@ -294,10 +294,11 @@ export const getClusteringStats = async (req, res) => {
     const clusterStats = await hasil_cluster.findAll({
       where: whereClause,
       attributes: [
+        'cluster',
         'keterangan',
         [Sequelize.fn('COUNT', Sequelize.col('id')), 'jumlah']
       ],
-      group: ['keterangan'],
+      group: ['cluster', 'keterangan'],
       raw: true
     });
 
@@ -313,6 +314,7 @@ export const getClusteringStats = async (req, res) => {
           const label = String(stat.keterangan).toLowerCase();
           const count = parseInt(stat.jumlah, 10) || 0;
           stats[label] = {
+            cluster_id: stat.cluster,
             count: count,
             percentage: totalResults > 0 ? ((count / totalResults) * 100).toFixed(1) : "0.0"
           };

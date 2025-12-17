@@ -3,6 +3,7 @@ import * as xlsx from 'xlsx';
 import Nilai from '../model/nilaiModel.js';
 import Siswa from '../model/siswaModel.js';
 import MataPelajaran from '../model/mapelModel.js';
+import RiwayatUpload from '../model/riwayatUploadModel.js';
 import db from '../config/database.js';
 
 
@@ -198,6 +199,21 @@ export const uploadNilaiFromExcel = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Input Kelas, Tahun Ajaran, dan Semester tidak boleh kosong.' });
   }
 
+  // Create an audit log for the upload attempt
+  try {
+    await RiwayatUpload.create({
+      nama_file: req.file.originalname,
+      kelas,
+      semester,
+      tahun_ajaran,
+      user_id: req.user?.id, // Use optional chaining in case user is not on req
+      file_path: req.file.path, // Assuming multer provides the file path
+    });
+  } catch (logError) {
+    console.error('Failed to log upload history:', logError);
+    // We don't stop the main process, but we log the failure
+  }
+
   const t = await db.transaction();
   try {
     const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
@@ -369,7 +385,6 @@ export const getNilaiFilters = async (req, res) => {
     res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
   }
 };
-
 export const getNilaiBySiswa = async (req, res) => {
   try {
     const { siswa_id } = req.params;
@@ -405,7 +420,33 @@ export const getNilaiBySiswa = async (req, res) => {
     res.json({ success: true, data: formattedNilai });
 
   } catch (error) {
-    console.error('Get nilai by siswa error:', error);
     res.status(500).json({ success: false, message: 'Terjadi kesalahan server' });
+  }
+};
+
+export const getNilaiUploadHistory = async (req, res) => {
+  try {
+    const history = await RiwayatUpload.findAll({
+      // Mengganti 'tanggal_upload' dengan 'created_at' karena model menggunakan timestamps
+      order: [['created_at', 'DESC']], 
+    });
+    
+    // Mengubah format data agar sesuai dengan apa yang diharapkan oleh frontend
+    const formattedHistory = history.map(item => ({
+      id: item.id_upload,
+      nama_file: item.nama_file,
+      kelas: item.kelas,
+      semester: item.semester,
+      tahun_ajaran: item.tahun_ajaran,
+      tanggal_upload: item.created_at, // Menggunakan created_at
+    }));
+
+    res.json({ success: true, data: formattedHistory });
+  } catch (error) {
+    console.error('Get upload history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Terjadi kesalahan server saat mengambil riwayat unggahan.',
+    });
   }
 };

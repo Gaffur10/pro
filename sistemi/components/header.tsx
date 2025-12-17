@@ -35,8 +35,8 @@ export function Header() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>Admin User</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profil</DropdownMenuItem>
-            <DropdownMenuItem>Pengaturan</DropdownMenuItem>
+            <DropdownMenuItem>Profil sendiri</DropdownMenuItem>
+            <DropdownMenuItem>ubah password</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem>Keluar</DropdownMenuItem>
           </DropdownMenuContent>

@@ -5,7 +5,7 @@ import {
   getClusteringStats, 
   clearClusteringResults 
 } from '../controllers/clusteringController.js';
-import { getElbowAnalysis } from '../controllers/elbowController.js';
+
 import { verifyToken, verifyTeacher } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -14,7 +14,7 @@ const router = express.Router();
 router.use(verifyToken);
 
 // Get elbow analysis
-router.get('/elbow', getElbowAnalysis);
+
 
 // Get clustering results with pagination and filtering
 router.get('/results', getClusteringResults);

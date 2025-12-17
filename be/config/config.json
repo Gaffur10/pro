@@ -2,7 +2,7 @@
   "development": {
     "username": "root",
     "password": "",
-    "database": "db_app",
+    "database": "db_sis",
     "host": "localhost",
     "dialect": "mysql"
   },

@@ -19,7 +19,7 @@ import nilaiRoutes from "./routes/nilaiRoutes.js";
 import clusteringRoutes from "./routes/clusteringRoutes.js";
 import userRoutes from './routes/userRoutes.js';
 import dashboardRoutes from "./routes/dashboardRoutes.js";
-import elbowRoutes from "./routes/elbowRoutes.js";
+
 
 dotenv.config();
 
@@ -110,7 +110,7 @@ app.use('/api/nilai', nilaiRoutes);
 app.use('/api/clustering', clusteringRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/analysis', elbowRoutes);
+
 
 // 404 handler
 app.use('*', (req, res) => {

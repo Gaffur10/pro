@@ -16,10 +16,18 @@ const Nilai = db.define(
     siswa_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
+      references: {
+        model: Siswa,
+        key: "id",
+      },
     },
     mapel_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
+      references: {
+        model: MataPelajaran,
+        key: "id",
+      },
     },
     semester: {
       type: DataTypes.STRING(20),

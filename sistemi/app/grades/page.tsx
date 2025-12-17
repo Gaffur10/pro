@@ -83,6 +83,13 @@ export default function GradesPage() {
   const [mapelSubmitError, setMapelSubmitError] = useState<string | null>(null);
   const [mapelSubmitSuccess, setMapelSubmitSuccess] = useState<string | null>(null);
 
+  // States for Grade Detail/Edit Dialog
+  const [isEditing, setIsEditing] = useState(false);
+  const [editableGrades, setEditableGrades] = useState<NilaiDetail[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailSuccess, setDetailSuccess] = useState<string | null>(null);
+
 
   useEffect(() => {
     fetchInitialData()
@@ -124,13 +131,54 @@ export default function GradesPage() {
 
   const handleViewDetails = (grade: GradeEntry) => {
     setSelectedGradeDetails(grade);
+    // Deep copy for editing to avoid mutating original state
+    setEditableGrades(JSON.parse(JSON.stringify(grade.nilai)));
+    setIsEditing(false);
+    setDetailError(null);
+    setDetailSuccess(null);
     setIsDetailDialogOpen(true);
+  };
+
+  const handleGradeChange = (mapel_id: number, value: string) => {
+    setEditableGrades(currentGrades =>
+      currentGrades.map(g =>
+        g.mapel_id === mapel_id ? { ...g, nilai: value } : g
+      )
+    );
+  };
+
+  const handleSaveGrades = async () => {
+    if (!selectedGradeDetails) return;
+
+    setIsSaving(true);
+    setDetailError(null);
+    setDetailSuccess(null);
+
+    const payload = {
+      siswa_id: selectedGradeDetails.siswa_id,
+      semester: selectedGradeDetails.semester,
+      tahun_ajaran: selectedGradeDetails.tahun_ajaran,
+      nilai: editableGrades.map(g => ({ mapel_id: g.mapel_id, nilai: g.nilai })),
+    };
+
+    try {
+      const response = await apiService.createOrUpdateNilai(payload);
+      setDetailSuccess(response.message || "Nilai berhasil diperbarui.");
+      await fetchInitialData(); // Refresh the main list
+      setIsEditing(false);
+    } catch (error: any) {
+      setDetailError(error.message || "Gagal menyimpan perubahan.");
+    } finally {
+      setIsSaving(false);
+    }
   };
   
   const calculateAverage = (nilai: NilaiDetail[]) => {
     if (!nilai || nilai.length === 0) return "N/A";
     const total = nilai.reduce((sum, item) => sum + parseFloat(item.nilai), 0);
-    return (total / nilai.length).toFixed(2);
+    const validItems = nilai.filter(item => !isNaN(parseFloat(item.nilai))).length;
+    if (validItems === 0) return "N/A";
+    return (total / validItems).toFixed(2);
   }
 
   // --- Upload Handlers ---
@@ -397,35 +445,71 @@ export default function GradesPage() {
       <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Detail Nilai {selectedGradeDetails?.nama}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit' : 'Detail'} Nilai {selectedGradeDetails?.nama}</DialogTitle>
             <DialogDescription>
               Semester: {selectedGradeDetails?.semester} | Tahun Ajaran: {selectedGradeDetails?.tahun_ajaran}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            {selectedGradeDetails?.nilai && selectedGradeDetails.nilai.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Mata Pelajaran</TableHead>
-                    <TableHead>Nilai</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedGradeDetails.nilai.map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{item.nama_mapel}</TableCell>
-                      <TableCell>{item.nilai}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+          <div className="py-4 space-y-4">
+            {detailSuccess && <Alert variant="success"><FileCheck2 className="h-4 w-4" /><AlertTitle>Berhasil!</AlertTitle><AlertDescription>{detailSuccess}</AlertDescription></Alert>}
+            {detailError && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{detailError}</AlertDescription></Alert>}
+
+            {isEditing ? (
+              <div className="space-y-2">
+                {editableGrades.map((item) => (
+                  <div key={item.mapel_id} className="grid grid-cols-3 items-center gap-4">
+                    <Label htmlFor={`grade-${item.mapel_id}`} className="col-span-1">{item.nama_mapel}</Label>
+                    <Input
+                      id={`grade-${item.mapel_id}`}
+                      type="number"
+                      value={item.nilai}
+                      onChange={(e) => handleGradeChange(item.mapel_id, e.target.value)}
+                      className="col-span-2"
+                      min="0"
+                      max="100"
+                    />
+                  </div>
+                ))}
+              </div>
             ) : (
-              <p>Tidak ada detail nilai yang tersedia.</p>
+              selectedGradeDetails?.nilai && selectedGradeDetails.nilai.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Mata Pelajaran</TableHead>
+                      <TableHead className="text-right">Nilai</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {editableGrades.map((item) => (
+                      <TableRow key={item.mapel_id}>
+                        <TableCell>{item.nama_mapel}</TableCell>
+                        <TableCell className="text-right">{item.nilai}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p>Tidak ada detail nilai yang tersedia.</p>
+              )
             )}
           </div>
           <DialogFooter>
-            <Button onClick={() => setIsDetailDialogOpen(false)}>Tutup</Button>
+            {isEditing ? (
+              <>
+                <Button variant="outline" onClick={() => setIsEditing(false)} disabled={isSaving}>Batal</Button>
+                <Button onClick={handleSaveGrades} disabled={isSaving}>
+                  {isSaving ? "Menyimpan..." : "Simpan Perubahan"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setIsEditing(true)}>
+                  <Edit className="mr-2 h-4 w-4" /> Edit
+                </Button>
+                <Button onClick={() => setIsDetailDialogOpen(false)}>Tutup</Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

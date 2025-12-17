@@ -1,5 +1,6 @@
 import { DataTypes } from 'sequelize';
 import db from '../config/database.js';
+import User from './userModel.js';
 
 const RiwayatUpload = db.define('riwayat_upload', {
   id_upload: {
@@ -7,6 +8,14 @@ const RiwayatUpload = db.define('riwayat_upload', {
     primaryKey: true,
     autoIncrement: true,
     allowNull: false
+  },
+  user_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true, // Nullable for backward compatibility
+    references: {
+      model: User,
+      key: 'id'
+    }
   },
   nama_file: {
     type: DataTypes.STRING,
@@ -39,5 +48,9 @@ const RiwayatUpload = db.define('riwayat_upload', {
   createdAt: 'created_at',
   updatedAt: 'updated_at'
 });
+
+// Define associations
+User.hasMany(RiwayatUpload, { foreignKey: 'user_id', as: 'riwayat_uploads' });
+RiwayatUpload.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 export default RiwayatUpload;

@@ -8,7 +8,8 @@ import {
   createMapel, // <-- Add this import
   getNilaiFilters,
   uploadNilaiFromExcel,
-  getNilaiBySiswa
+  getNilaiBySiswa,
+  getNilaiUploadHistory
 } from '../controllers/nilaiController.js';
 import { verifyToken, verifyTeacher } from '../middleware/auth.js';
 import upload from '../middleware/upload.js';
@@ -17,6 +18,9 @@ const router = express.Router();
 
 // All routes below require an authenticated user
 router.use(verifyToken);
+
+// Route to get upload history
+router.get('/history', getNilaiUploadHistory);
 
 // Route to upload and process an Excel file
 router.post('/upload', verifyTeacher, upload.single('file'), uploadNilaiFromExcel);

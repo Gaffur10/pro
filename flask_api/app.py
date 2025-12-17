@@ -1,199 +1,171 @@
-# Import library yang diperlukan
-from flask import Flask, request, jsonify  # Flask untuk membuat server web
-from flask_cors import CORS               # Untuk mengizinkan request dari domain lain (frontend)
-import random
-import math
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import numpy as np
 
-# Inisialisasi aplikasi Flask
+
 app = Flask(__name__)
-# Aktifkan CORS untuk semua rute, agar frontend bisa mengakses API ini
 CORS(app)
 
-# === IMPLEMENTASI K-MEANS DARI AWAL ===
-def hitung_jarak_euclidean(titik1, titik2):
-    """Fungsi bantuan untuk menghitung jarak antara dua titik."""
-    total_jarak_kuadrat = 0
-    for i in range(len(titik1)):
-        total_jarak_kuadrat += (titik1[i] - titik2[i]) ** 2
-    return math.sqrt(total_jarak_kuadrat)
-
-def hitung_wcss(data, labels, centroids):
-    """Menghitung Within-Cluster Sum of Squares (WCSS)."""
-    wcss = 0
-    for i, titik_data in enumerate(data):
-        # Dapatkan centroid yang ditetapkan untuk titik data saat ini
-        centroid_assigned = centroids[labels[i]]
-        # Tambahkan kuadrat jarak dari titik ke centroidnya
-        wcss += hitung_jarak_euclidean(titik_data, centroid_assigned) ** 2
-    return wcss
-
-# === FUNGSI NORMALISASI MIN-MAX ===
-def normalisasi_minmax(vectors):
-    """Normalisasi Min-Max ke 0-1 untuk setiap fitur (mata pelajaran)."""
-    if not vectors:
-        return []
-
-    # Transpose biar bisa ambil nilai per kolom
-    transposed = list(zip(*vectors))
-    normalized = []
-
-    for vector in vectors:
-        norm_vector = []
-        for j in range(len(vector)):
-            col = transposed[j]
-            min_val, max_val = min(col), max(col)
-            if max_val == min_val:  # jika semua nilai sama di satu fitur
-                norm_vector.append(0.0)
-            else:
-                norm_vector.append((vector[j] - min_val) / (max_val - min_val))
-        norm_vector = [round(val, 4) for val in norm_vector]  # biar rapi
-        normalized.append(norm_vector)
-
-    return normalized
+# ===============================
+# NORMALISASI MINMAX MANUAL
+# ===============================
+def minmax_scale(data):
+    # Konversi ke numpy array jika belum
+    data_np = np.array(data, dtype=float)
+    if data_np.ndim == 1: # Handle jika data hanya satu dimensi
+        data_np = data_np.reshape(-1, 1)
+    
+    min_val = data_np.min(axis=0)
+    max_val = data_np.max(axis=0)
+    
+    # Tambahkan epsilon untuk menghindari pembagian dengan nol
+    denominator = max_val - min_val
+    denominator[denominator == 0] = 1e-9
+    
+    scaled = (data_np - min_val) / denominator
+    return scaled, min_val.tolist(), max_val.tolist()
 
 
-def jalankan_kmeans(data, k, max_iterasi=100):
-    """
-    Implementasi sederhana algoritma K-Means dari awal untuk tujuan demonstrasi.
-    """
-    if not data or len(data) < k:
-        return [], []
+# ===============================
+# HITUNG JARAK EUCLIDEAN
+# ===============================
+def euclidean(p1, p2):
+    return np.sqrt(np.sum((np.array(p1) - np.array(p2)) ** 2))
 
-    # Tetapkan random seed untuk hasil yang konsisten
-    random.seed(0)
 
-    # === LANGKAH 1: Inisialisasi Centroid ===
-    centroids = [list(c) for c in random.sample(data, k)]
+# ===============================
+# K-MEANS MANUAL
+# ===============================
+# Diperbarui untuk mengembalikan jarak setiap titik ke centroidnya
+def kmeans_manual(data_scaled, k, max_iter=300):
+    n_samples = len(data_scaled)
+    
+    # Handle jika k lebih besar dari jumlah sampel
+    if k > n_samples:
+        # Mengembalikan nilai default atau error, sesuai kebutuhan aplikasi
+        # Di sini kita kembalikan array kosong sebagai indikasi
+        return [], [], 0, []
 
-    for i in range(max_iterasi):
-        clusters = [[] for _ in range(k)]
-        labels = []
+    # Inisialisasi centroid acak
+    # Pastikan sampel unik jika memungkinkan
+    idx = np.arange(k)
+    centroids = data_scaled[idx]
 
-        # === LANGKAH 2: Penugasan Cluster (Assignment) ===
-        for titik_data_siswa in data:
-            jarak_ke_centroids = [hitung_jarak_euclidean(titik_data_siswa, c) for c in centroids]
-            indeks_cluster_terdekat = jarak_ke_centroids.index(min(jarak_ke_centroids))
-            clusters[indeks_cluster_terdekat].append(titik_data_siswa)
-            labels.append(indeks_cluster_terdekat)
+    clusters = np.zeros(n_samples, dtype=int)
+
+    for _ in range(max_iter):
+        # Assign cluster
+        for i, point in enumerate(data_scaled):
+            distances = [euclidean(point, centroid) for centroid in centroids]
+            clusters[i] = np.argmin(distances)
+
+        # Update centroid
+        new_centroids = np.array([data_scaled[clusters == i].mean(axis=0) for i in range(k)])
         
-        centroids_lama = centroids[:]
-
-        # === LANGKAH 3: Pembaruan Centroid (Update) ===
-        for indeks_cluster in range(k):
-            if clusters[indeks_cluster]:
-                centroid_baru = [sum(dimensi) / len(dimensi) for dimensi in zip(*clusters[indeks_cluster])]
-                centroids[indeks_cluster] = centroid_baru
-        
-        # === LANGKAH 4: Periksa Konvergensi ===
-        apakah_konvergen = True
-        for idx in range(k):
-            if hitung_jarak_euclidean(centroids_lama[idx], centroids[idx]) > 0.0001:
-                apakah_konvergen = False
-                break
-        
-        if apakah_konvergen:
+        # Cek konvergensi
+        if np.allclose(centroids, new_centroids):
             break
+            
+        centroids = new_centroids
 
-    return labels, centroids
-# === AKHIR DARI IMPLEMENTASI K-MEANS ===
+    # Hitung WCSS dan jarak individual
+    wcss = 0
+    point_distances = []
+    for i, point in enumerate(data_scaled):
+        dist_to_centroid = euclidean(point, centroids[clusters[i]])
+        wcss += dist_to_centroid ** 2
+        point_distances.append(dist_to_centroid)
+
+    return clusters.tolist(), centroids.tolist(), wcss, point_distances
 
 
-# Definisikan endpoint untuk clustering, hanya menerima metode POST
+# ===============================
+# ENDPOINT: CLUSTERING (SEBELUMNYA /kmeans)
+# ===============================
 @app.route('/clustering', methods=['POST'])
-def clustering():
-    """
-    Endpoint ini menerima data nilai siswa, menjalankan algoritma K-Means,
-    dan mengembalikan hasil pengelompokan beserta jarak ke centroid.
-    """
+def process_clustering():
     try:
-        data = request.get_json()
-        
-        if not data or 'data' not in data or 'n_clusters' not in data:
-            return jsonify({'error': 'Request tidak valid. Key `data` atau `n_clusters` tidak ditemukan'}), 400
+        body = request.json
 
-        n_clusters = data.get('n_clusters', 5)
-        items = data.get('data', [])
+        # Disesuaikan dengan request dari Node.js
+        data_with_ids = body['data']
+        k = int(body['n_clusters'])
 
-        if not items:
-            return jsonify({'error': 'List data kosong'}), 400
+        # Ekstrak vektor dan ID
+        ids = [item['id'] for item in data_with_ids]
+        vectors = [item['vector'] for item in data_with_ids]
 
-        ids = [item['id'] for item in items]
-        vectors = [item['vector'] for item in items]
+        if not vectors:
+            return jsonify({"error": "Data vektor tidak boleh kosong"}), 400
 
-        if len(vectors) < n_clusters:
-            return jsonify({'error': f'Jumlah data ({len(vectors)}) tidak boleh kurang dari jumlah cluster ({n_clusters})'}), 400
+        # Normalisasi
+        data_scaled, min_val, max_val = minmax_scale(vectors)
 
-        # ✅ Normalisasi sebelum clustering
-        vectors = normalisasi_minmax(vectors)        
-        
-        # Jalankan K-Means dan dapatkan juga posisi centroid final
-        cluster_labels, centroids = jalankan_kmeans(vectors, n_clusters)
+        # Proses k-means manual
+        labels, centroids, wcss, distances = kmeans_manual(data_scaled, k)
 
-        # Siapkan hasil dengan menyertakan jarak ke centroid
+        # Format hasil sesuai yang diharapkan Node.js
         results = []
-        for i, vector in enumerate(vectors):
-            label = cluster_labels[i]
-            centroid = centroids[label]
-            distance = hitung_jarak_euclidean(vector, centroid)
+        for i in range(len(ids)):
             results.append({
-                'id': ids[i],
-                'cluster': int(label),
-                'distance': distance
+                "id": ids[i],
+                "cluster": labels[i],
+                "distance": distances[i]
             })
 
-        # Kembalikan hasil, beserta posisi akhir centroid untuk pemeringkatan di backend
         return jsonify({
-            'results': results,
-            'centroids': centroids
+            "results": results,
+            "centroids": centroids,
+            "wcss": wcss,
+            "min_val": min_val,
+            "max_val": max_val,
+            "message": "K-Means manual berhasil dijalankan"
         })
 
     except Exception as e:
-        print(f"Terjadi error di /clustering: {e}")
-        return jsonify({'error': 'Terjadi kesalahan internal pada server'}), 500
+        print(f"ERROR /clustering: {e}")
+        return jsonify({"error": f"Terjadi kesalahan pada server: {e}"}), 500
 
-# Definisikan endpoint untuk perhitungan Elbow Method
+
+# ===============================
+# ENDPOINT: ELBOW METHOD
+# ===============================
 @app.route('/elbow', methods=['POST'])
-def elbow_method():
-    """
-    Endpoint ini menjalankan K-Means untuk rentang K dan mengembalikan skor WCSS.
-    """
+def process_elbow():
     try:
-        req_data = request.get_json()
-        if not req_data or 'data' not in req_data:
-            return jsonify({'error': 'Request tidak valid. Key `data` tidak ditemukan'}), 400
+        body = request.json
+        
+        # Disesuaikan dengan request dari Node.js
+        data_with_vectors = body['data']
+        max_k = int(body.get('max_k', 10)) # Ambil max_k, default 10
 
-        vectors = [item['vector'] for item in req_data.get('data', [])]
-        max_k = req_data.get('max_k', 10)
+        vectors = [item['vector'] for item in data_with_vectors]
 
         if not vectors:
-            return jsonify({'error': 'List data kosong'}), 400
-        
-            # ✅ Normalisasi sebelum hitung WCSS
-        vectors = normalisasi_minmax(vectors)
+            return jsonify({"error": "Data vektor tidak boleh kosong"}), 400
 
-        wcss_scores = []
-        # Loop dari k=1 sampai max_k
+        # Normalisasi sekali saja
+        data_scaled, _, _ = minmax_scale(vectors)
+
+        results = []
+        # Gunakan max_k dari request
         for k in range(1, max_k + 1):
-            # Hentikan jika jumlah data lebih sedikit dari jumlah cluster
-            if len(vectors) < k:
+            # Pastikan jumlah cluster tidak melebihi jumlah data
+            if k > len(data_scaled):
                 break
             
-            # Jalankan K-Means untuk nilai k saat ini
-            labels, centroids = jalankan_kmeans(vectors, k)
-            
-            # Hitung WCSS dan simpan hasilnya
-            wcss = hitung_wcss(vectors, labels, centroids)
-            wcss_scores.append({'k': k, 'wcss': wcss})
+            _, _, wcss, _ = kmeans_manual(data_scaled, k)
+            results.append({
+                "k": k,
+                "wcss": float(wcss)
+            })
 
-        return jsonify(wcss_scores)
+        return jsonify(results)
 
     except Exception as e:
-        print(f"Terjadi error di /elbow: {e}")
-        return jsonify({'error': 'Terjadi kesalahan internal pada server'}), 500
+        print(f"ERROR /elbow: {e}")
+        return jsonify({"error": f"Terjadi kesalahan pada server: {e}"}), 500
 
 
-# Jalankan aplikasi jika file ini dieksekusi secara langsung
-if __name__ == '__main__':
-    # debug=True agar server otomatis restart saat ada perubahan kode
-    # port=5001 agar tidak bentrok dengan port server lain (Node.js atau Next.js)
+if __name__ == "__main__":
     app.run(debug=True, port=5001)
