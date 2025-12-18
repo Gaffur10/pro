@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BarChart3, Play, Trash2, Download, Filter } from "lucide-react"
 import apiService from "@/lib/api"
 import { StudentGradeDetailModal } from '@/components/student-grade-detail-modal'
+import { DownloadReportModal } from "@/components/download-report-modal";
 
 
 // Struktur data hasil clustering yang diterima dari backend
@@ -62,6 +63,7 @@ export default function ClusteringPage() {
 
   // State untuk detail siswa (modal)
   const [detailSiswa, setDetailSiswa] = useState<ClusteringResult | null>(null)
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
 
 
@@ -76,6 +78,51 @@ export default function ClusteringPage() {
     semester: "",
     kelas: "",
   });
+
+  const handleDownloadReport = async (selectedFilters: {
+    tahun_ajaran: string;
+    semester: string;
+    kelas: string[];
+  }) => {
+    try {
+      const response = await apiService.downloadClusteringReport(selectedFilters);
+
+      // Cek jika respons TIDAK sukses (misal: error 400, 500)
+      if (!response.ok) {
+        // Coba parsing body error sebagai JSON
+        const errorData = await response.json().catch(() => null);
+        const errorMessage = errorData?.message || `Gagal membuat laporan (status: ${response.status}).`;
+        setError(errorMessage);
+        return; // Hentikan eksekusi
+      }
+
+      // Jika respons sukses, proses sebagai file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      const contentDisposition = response.headers.get('content-disposition');
+      let fileName = `Laporan_Clustering.pdf`; // Default filename
+      if (contentDisposition) {
+        const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (fileNameMatch && fileNameMatch.length > 1) {
+          fileName = fileNameMatch[1];
+        }
+      }
+
+      link.setAttribute("download", fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setError(""); // Hapus error jika sukses
+
+    } catch (error: any) {
+      console.error("Gagal mengunduh laporan:", error);
+      setError(error.message || "Gagal mengunduh laporan. Periksa konsol untuk detail.");
+    }
+  };
 
   // State untuk filter yang aktif digunakan untuk menampilkan data di tabel
   const [activeFilters, setActiveFilters] = useState({
@@ -255,12 +302,19 @@ export default function ClusteringPage() {
         <div className="flex space-x-2">
           {results.length > 0 && (
             <>
+              <Button variant="outline" onClick={() => setIsReportModalOpen(true)}><Download className="mr-2 h-4 w-4" />Laporan PDF</Button>
               <Button variant="outline" onClick={handleExport}><Download className="mr-2 h-4 w-4" />Export</Button>
               <Button variant="destructive" onClick={handleClearResults}><Trash2 className="mr-2 h-4 w-4" />Hapus Hasil</Button>
             </>
           )}
         </div>
       </div>
+      <DownloadReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        filters={filters}
+        onSubmit={handleDownloadReport}
+      />
 
       {error && <div className="bg-red-100 text-red-700 p-3 rounded">{error}</div>}
 

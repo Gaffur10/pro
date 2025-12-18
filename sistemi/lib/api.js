@@ -42,7 +42,10 @@ class ApiService {
       
       return await response.json();
     } catch (error) {
-      console.error('API Error:', error);
+      // Jangan laporkan AbortError sebagai error, karena itu adalah bagian normal dari alur pembatalan
+      if (error.name !== 'AbortError') {
+        console.error('API Error:', error);
+      }
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
         throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
       }
@@ -207,11 +210,8 @@ class ApiService {
         throw error;
       }
       
-      // Return blob data and headers for file handling
-      return {
-        data: await response.blob(),
-        headers: response.headers,
-      };
+      // Return the raw response to be handled by the calling function
+      return response;
 
     } catch (error) {
       console.error('API Download Error:', error);

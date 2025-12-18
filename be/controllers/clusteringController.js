@@ -4,6 +4,7 @@ import Nilai from '../model/nilaiModel.js'; // Ganti dengan model baru
 import Siswa from '../model/siswaModel.js';
 import MataPelajaran from '../model/mapelModel.js'; // Ganti dengan model baru
 import axios from 'axios';
+import PDFDocument from 'pdfkit';
 
 export const runClustering = async (req, res) => {
   try {
@@ -268,6 +269,79 @@ export const getClusteringResults = async (req, res) => {
   }
 };
 
+
+// Helper function to calculate stats
+const calculateClusteringStats = async (whereClause, include = []) => {
+  const totalResults = await hasil_cluster.count({ where: whereClause, include });
+
+  if (totalResults === 0) {
+    return {
+      total_results: 0,
+      cluster_distribution: {},
+      average_distance: 0,
+      algorithm_used: "N/A",
+      clusters_count: 0
+    };
+  }
+
+  const clusterStats = await hasil_cluster.findAll({
+    where: whereClause,
+    include,
+    attributes: [
+      'cluster',
+      'keterangan',
+      [Sequelize.fn('COUNT', Sequelize.col('hasil_cluster.id')), 'jumlah']
+    ],
+    group: ['cluster', 'keterangan'],
+    raw: true
+  });
+
+  const latestClustering = await hasil_cluster.findOne({
+    where: whereClause,
+    include,
+    order: [['created_at', 'DESC']],
+  });
+
+  const stats = {};
+  if (Array.isArray(clusterStats)) {
+    clusterStats.forEach(stat => {
+      if (stat && stat.keterangan) {
+        const label = String(stat.keterangan).toLowerCase();
+        const count = parseInt(stat.jumlah, 10) || 0;
+        stats[label] = {
+          cluster_id: stat.cluster,
+          count: count,
+          percentage: totalResults > 0 ? ((count / totalResults) * 100).toFixed(1) : "0.0"
+        };
+      }
+    });
+  }
+
+  const allDistances = await hasil_cluster.findAll({
+    where: whereClause,
+    include,
+    attributes: ['jarak_centroid'],
+    raw: true
+  });
+
+  let averageDistance = 0;
+  if (Array.isArray(allDistances) && allDistances.length > 0) {
+    const totalDistance = allDistances.reduce((sum, item) => {
+      const distance = parseFloat(item.jarak_centroid);
+      return sum + (isNaN(distance) ? 0 : distance);
+    }, 0);
+    averageDistance = totalDistance / allDistances.length;
+  }
+
+  return {
+    total_results: totalResults,
+    cluster_distribution: stats,
+    average_distance: averageDistance,
+    algorithm_used: latestClustering ? latestClustering.algoritma : "K-Means",
+    clusters_count: latestClustering ? latestClustering.jumlah_cluster : 3
+  };
+};
+
 export const getClusteringStats = async (req, res) => {
   try {
     const { semester, tahun_ajaran } = req.query;
@@ -276,76 +350,11 @@ export const getClusteringStats = async (req, res) => {
     if (semester) whereClause.semester = semester;
     if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
 
-    const totalResults = await hasil_cluster.count({ where: whereClause });
-
-    if (totalResults === 0) {
-      return res.json({
-        success: true,
-        data: {
-          total_results: 0,
-          cluster_distribution: {},
-          average_distance: 0,
-          algorithm_used: "N/A",
-          clusters_count: 0
-        }
-      });
-    }
-
-    const clusterStats = await hasil_cluster.findAll({
-      where: whereClause,
-      attributes: [
-        'cluster',
-        'keterangan',
-        [Sequelize.fn('COUNT', Sequelize.col('id')), 'jumlah']
-      ],
-      group: ['cluster', 'keterangan'],
-      raw: true
-    });
-
-    const latestClustering = await hasil_cluster.findOne({
-      where: whereClause,
-      order: [['created_at', 'DESC']],
-    });
-
-    const stats = {};
-    if (Array.isArray(clusterStats)) {
-      clusterStats.forEach(stat => {
-        if (stat && stat.keterangan) {
-          const label = String(stat.keterangan).toLowerCase();
-          const count = parseInt(stat.jumlah, 10) || 0;
-          stats[label] = {
-            cluster_id: stat.cluster,
-            count: count,
-            percentage: totalResults > 0 ? ((count / totalResults) * 100).toFixed(1) : "0.0"
-          };
-        }
-      });
-    }
-
-    const allDistances = await hasil_cluster.findAll({
-      where: whereClause,
-      attributes: ['jarak_centroid'],
-      raw: true
-    });
-
-    let averageDistance = 0;
-    if (Array.isArray(allDistances) && allDistances.length > 0) {
-      const totalDistance = allDistances.reduce((sum, item) => {
-        const distance = parseFloat(item.jarak_centroid);
-        return sum + (isNaN(distance) ? 0 : distance);
-      }, 0);
-      averageDistance = totalDistance / allDistances.length;
-    }
+    const statsData = await calculateClusteringStats(whereClause);
 
     res.json({
       success: true,
-      data: {
-        total_results: totalResults,
-        cluster_distribution: stats,
-        average_distance: averageDistance,
-        algorithm_used: latestClustering ? latestClustering.algoritma : "K-Means",
-        clusters_count: latestClustering ? latestClustering.jumlah_cluster : 3
-      }
+      data: statsData
     });
 
   } catch (error) {
@@ -388,10 +397,176 @@ export const clearClusteringResults = async (req, res) => {
       message: message
     });
   } catch (error) {
-    console.error('Clear clustering results error:', error);
     res.status(500).json({
       success: false,
       message: 'Terjadi kesalahan server'
     });
+  }
+};
+export const downloadClusteringReport = async (req, res) => {
+  try {
+    const { tahun_ajaran, semester, kelas } = req.query;
+    const kelasList = Array.isArray(kelas) ? kelas : (kelas ? kelas.split(',') : []);
+
+
+    const whereClause = {};
+    if (tahun_ajaran) whereClause.tahun_ajaran = tahun_ajaran;
+    if (semester) whereClause.semester = semester;
+    
+    const siswaInclude = {
+      model: Siswa,
+      as: 'siswa',
+      attributes: ['id', 'nis', 'nama', 'kelas'],
+      where: {}
+    };
+
+    if (kelasList.length > 0) {
+      siswaInclude.where.kelas = kelasList;
+    }
+
+
+    // Batas jumlah data untuk mencegah server crash
+    const DATA_LIMIT = 2000;
+
+    // Hitung dulu jumlah data yang akan di-fetch
+    const recordCount = await hasil_cluster.count({
+      where: whereClause,
+      include: [siswaInclude],
+    });
+
+    // Jika data terlalu besar, kembalikan error
+    if (recordCount > DATA_LIMIT) {
+      return res.status(400).json({
+        message: `Data terlalu besar untuk diunduh (${recordCount} baris). Harap gunakan filter kelas yang lebih spesifik untuk mengurangi ukuran laporan.`,
+      });
+    }
+
+    // Fetch all results without pagination
+    const results = await hasil_cluster.findAll({
+      where: whereClause,
+      include: [siswaInclude],
+      order: [['keterangan', 'ASC'], ['jarak_centroid', 'ASC']],
+    });
+
+    // Filter out results where the included 'siswa' is null (due to the inner join behavior)
+    const filteredResults = results.filter(r => r.siswa);
+
+    if (filteredResults.length === 0) {
+      return res.status(404).json({ message: "Tidak ada data untuk kriteria yang dipilih." });
+    }
+
+    // --- PDF Generation ---
+    const doc = new PDFDocument({ margin: 30, size: 'A4' });
+
+    // Set headers for PDF download
+    const filename = `Laporan-Clustering-${tahun_ajaran}-${semester}.pdf`.replace(/ /g, '_');
+    res.setHeader('Content-disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-type', 'application/pdf');
+    doc.pipe(res);
+
+    // --- PDF Content ---
+
+    // Header
+    doc.fontSize(18).font('Helvetica-Bold').text('Laporan Hasil Clustering Siswa', { align: 'center' });
+    doc.moveDown();
+
+    // Filter Info
+    doc.fontSize(10).font('Helvetica').text(`Tahun Ajaran: ${tahun_ajaran}`);
+    doc.text(`Semester: ${semester}`);
+    if (kelasList.length > 0) {
+      doc.text(`Kelas: ${kelasList.join(', ')}`);
+    }
+    doc.moveDown(2);
+
+    // --- Ringkasan (dihitung dari data yang sudah ada untuk efisiensi) ---
+    const totalSiswa = filteredResults.length;
+    const clusterDistribution = filteredResults.reduce((acc, result) => {
+        const label = result.keterangan.toLowerCase();
+        if (!acc[label]) {
+            acc[label] = { count: 0, cluster_id: result.cluster };
+        }
+        acc[label].count++;
+        return acc;
+    }, {});
+
+    Object.keys(clusterDistribution).forEach(label => {
+        const percentage = (clusterDistribution[label].count / totalSiswa) * 100;
+        clusterDistribution[label].percentage = percentage.toFixed(1);
+    });
+
+    const firstResult = filteredResults[0];
+    const stats = {
+        total_results: totalSiswa,
+        clusters_count: firstResult.jumlah_cluster,
+        algorithm_used: firstResult.algoritma,
+        cluster_distribution: clusterDistribution,
+    };
+    
+    doc.fontSize(14).font('Helvetica-Bold').text('Ringkasan Hasil');
+    doc.fontSize(10).font('Helvetica')
+       .text(`Total Siswa: ${stats.total_results}`)
+       .text(`Jumlah Cluster: ${stats.clusters_count}`)
+       .text(`Algoritma: ${stats.algorithm_used}`);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').text('Distribusi Cluster:');
+    if (stats.cluster_distribution) {
+        // Urutkan label cluster untuk konsistensi
+        const sortedDistribution = Object.entries(stats.cluster_distribution).sort(([labelA], [labelB]) => {
+            const rank = { 'sangat tinggi': 1, 'tinggi': 2, 'sedang': 3, 'rendah': 4, 'sangat rendah': 5 };
+            return (rank[labelA] || 99) - (rank[labelB] || 99);
+        });
+
+        sortedDistribution.forEach(([label, data]) => {
+            const formattedLabel = label.charAt(0).toUpperCase() + label.slice(1);
+            doc.font('Helvetica').text(`- ${formattedLabel}: ${data.count} siswa (${data.percentage}%)`);
+        });
+    }
+    doc.moveDown(2);
+
+
+    // Table Header
+    const tableTop = doc.y;
+    const itemX = 30;
+    const nisX = 80;
+    const nameX = 150;
+    const classX = 300;
+    const clusterX = 350;
+    const distanceX = 420;
+    const avgGradeX = 500;
+
+    doc.fontSize(10).font('Helvetica-Bold');
+    doc.text('No.', itemX, tableTop);
+    doc.text('NIS', nisX, tableTop);
+    doc.text('Nama Siswa', nameX, tableTop);
+    doc.text('Kelas', classX, tableTop);
+    doc.text('Keterangan', clusterX, tableTop);
+    doc.text('Jarak', distanceX, tableTop);
+    // doc.text('Rata-rata', avgGradeX, tableTop);
+    
+    // Draw a line under the header
+    doc.moveTo(itemX - 5, doc.y).lineTo(avgGradeX + 50, doc.y).stroke();
+    doc.moveDown();
+
+    // Table Rows
+    doc.font('Helvetica').fontSize(9);
+    filteredResults.forEach((item, index) => {
+        const y = doc.y;
+        doc.text(index + 1, itemX, y, { width: 40 });
+        doc.text(item.siswa.nis, nisX, y, { width: 60 });
+        doc.text(item.siswa.nama, nameX, y, { width: 140 });
+        doc.text(item.siswa.kelas, classX, y, { width: 40 });
+        doc.text(item.keterangan, clusterX, y, { width: 60 });
+        doc.text(parseFloat(item.jarak_centroid).toFixed(4), distanceX, y, { width: 70 });
+        // doc.text(item.nilai_rata_rata, avgGradeX, y, { width: 40 });
+        doc.moveDown();
+    });
+
+    // Finalize PDF
+    doc.end();
+
+  } catch (error) {
+    console.error('Download report error:', error);
+    res.status(500).json({ message: 'Gagal membuat laporan PDF.' });
   }
 };
