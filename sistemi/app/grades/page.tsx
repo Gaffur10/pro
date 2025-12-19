@@ -517,6 +517,23 @@ export default function GradesPage() {
       {/* Dialog for Mapel List */}
       <Dialog open={isMapelDialogOpen} onOpenChange={setIsMapelDialogOpen}>
         <DialogContent className="max-w-2xl">
+            <div className="pt-4 border-t">
+              <h4 className="font-medium mb-2">Tambah Mata Pelajaran Baru</h4>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Contoh: Kimia"
+                  value={newMapelName}
+                  onChange={(e) => setNewMapelName(e.target.value)}
+                  disabled={isSubmittingMapel}
+                />
+                <Button onClick={handleCreateMapel} disabled={isSubmittingMapel}>
+                  {isSubmittingMapel ? "Menyimpan..." : "Simpan"}
+                </Button>
+              </div>
+              {mapelSubmitError && <p className="text-sm text-red-600 mt-2">{mapelSubmitError}</p>}
+              {mapelSubmitSuccess && <p className="text-sm text-green-600 mt-2">{mapelSubmitSuccess}</p>}
+            </div>
+          <div className="pt-4 border-t">
           <DialogHeader>
             <DialogTitle>Daftar Mata Pelajaran</DialogTitle>
             <DialogDescription>Berikut adalah semua mata pelajaran yang terdaftar di sistem. Gunakan nama ini sebagai header kolom di file Excel Anda.</DialogDescription>
@@ -544,22 +561,7 @@ export default function GradesPage() {
             ) : (
               <p>Tidak ada data mata pelajaran yang ditemukan.</p>
             )}
-            <div className="pt-4 border-t">
-              <h4 className="font-medium mb-2">Tambah Mata Pelajaran Baru</h4>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Contoh: Kimia"
-                  value={newMapelName}
-                  onChange={(e) => setNewMapelName(e.target.value)}
-                  disabled={isSubmittingMapel}
-                />
-                <Button onClick={handleCreateMapel} disabled={isSubmittingMapel}>
-                  {isSubmittingMapel ? "Menyimpan..." : "Simpan"}
-                </Button>
-              </div>
-              {mapelSubmitError && <p className="text-sm text-red-600 mt-2">{mapelSubmitError}</p>}
-              {mapelSubmitSuccess && <p className="text-sm text-green-600 mt-2">{mapelSubmitSuccess}</p>}
-            </div>
+          </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsMapelDialogOpen(false)}>Tutup</Button>
